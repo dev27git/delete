@@ -10,6 +10,7 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from .database import Base, engine, get_db
+from .enrichment import fetch_enrichment_news, list_enrichment_connectors
 from .models import CompanyNews, CompanyProfile, CompanySource
 from .schemas import (
     CompanyDetailRead,
@@ -19,6 +20,7 @@ from .schemas import (
     CompetitiveURLCreate,
     CompetitiveURLRead,
     CompetitorComparisonRead,
+    EnrichmentConnectorRead,
     FeatureSignal,
     ToolSignal,
 )
@@ -30,6 +32,7 @@ from .scraper import (
     extract_linkedin_company_url,
     fetch_company_news,
     fetch_linkedin_news,
+    infer_company_name_from_domain,
     normalize_company_key,
     normalize_url,
     scrape_source_url,
@@ -43,6 +46,7 @@ app = FastAPI(title="Concentric Competitive Intelligence API", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):51[0-9]{2}",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -57,6 +61,22 @@ def on_startup() -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/enrichment-connectors", response_model=list[EnrichmentConnectorRead])
+def list_connectors() -> list[EnrichmentConnectorRead]:
+    return [
+        EnrichmentConnectorRead(
+            id=connector.id,
+            name=connector.name,
+            category=connector.category,
+            method=connector.method,
+            site_domain=connector.site_domain,
+            requires_api_key=connector.requires_api_key,
+            enabled_by_default=connector.enabled_by_default,
+        )
+        for connector in list_enrichment_connectors()
+    ]
 
 
 def _now() -> datetime:
@@ -129,7 +149,7 @@ def _serialize_source(source: CompanySource) -> CompetitiveURLRead:
         url=source.source_url,
         domain=source.source_domain,
         source_type=source.source_type,
-        status="failed" if source.last_error else "scraped",
+        status="partial" if source.last_error and source.company_id else "failed" if source.last_error else "scraped",
         company_id=source.company_id,
         company_name=source.company.company_name if source.company else source.detected_company_name,
         confidence=source.confidence,
@@ -172,6 +192,8 @@ def _serialize_company_summary(company: CompanyProfile) -> CompanySummaryRead:
         source_count=company.source_count,
         news_count=company.news_count,
         linkedin_news_count=_count_company_news(company, source="linkedin_news_rss"),
+        enrichment_news_count=_count_company_news_prefix(company, prefix="enrichment:"),
+        news_source_counts=_company_news_source_counts(company),
         last_refreshed_at=company.last_refreshed_at,
         features=_load_features(company.feature_set_json),
         tools=_load_tools(company.tool_set_json),
@@ -230,6 +252,21 @@ def _count_company_news(company: CompanyProfile, source: str) -> int:
         if item.source == source:
             count += 1
     return count
+
+
+def _count_company_news_prefix(company: CompanyProfile, prefix: str) -> int:
+    count = 0
+    for item in company.news_items:
+        if item.source.startswith(prefix):
+            count += 1
+    return count
+
+
+def _company_news_source_counts(company: CompanyProfile) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in company.news_items:
+        counts[item.source] = counts.get(item.source, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _resolve_company_linkedin_url(company: CompanyProfile) -> str | None:
@@ -302,57 +339,79 @@ def _recompute_company_profile(db: Session, company: CompanyProfile) -> None:
         company.website_url = best_source.source_url or company.website_url
 
 
-def _refresh_company_news(db: Session, company: CompanyProfile) -> None:
+def _add_news_items(db: Session, company: CompanyProfile, items: list[Any], source: str) -> int:
+    added = 0
+    for item in items:
+        article_url = item.article_url.strip()
+        if not article_url:
+            continue
+        exists = db.scalar(select(CompanyNews).where(CompanyNews.article_url == article_url))
+        if exists:
+            continue
+        db.add(
+            CompanyNews(
+                company_id=company.id,
+                title=item.title[:400],
+                article_url=article_url,
+                publisher=item.publisher,
+                summary=item.summary,
+                published_at=item.published_at,
+                source=source,
+            )
+        )
+        added += 1
+    return added
+
+
+def _update_company_news_count(db: Session, company: CompanyProfile) -> None:
+    db.flush()
+    company.news_count = db.scalar(select(func.count(CompanyNews.id)).where(CompanyNews.company_id == company.id)) or 0
+    company.last_refreshed_at = _now()
+
+
+def _refresh_company_news(db: Session, company: CompanyProfile) -> dict[str, int]:
     linkedin_url = _resolve_company_linkedin_url(company)
-    news_collected = False
+    added_counts: dict[str, int] = {}
 
     try:
         news_items = fetch_company_news(company_name=company.company_name, domain=company.primary_domain)
-        news_collected = True
-        for item in news_items:
-            exists = db.scalar(select(CompanyNews).where(CompanyNews.article_url == item.article_url))
-            if exists:
-                continue
-            db.add(
-                CompanyNews(
-                    company_id=company.id,
-                    title=item.title,
-                    article_url=item.article_url,
-                    publisher=item.publisher,
-                    summary=item.summary,
-                    published_at=item.published_at,
-                    source="google_news_rss",
-                )
-            )
+        added_counts["google_news_rss"] = _add_news_items(
+            db=db,
+            company=company,
+            items=news_items,
+            source="google_news_rss",
+        )
     except Exception:
-        pass
+        added_counts["google_news_rss"] = 0
 
     try:
         linkedin_news = fetch_linkedin_news(company_name=company.company_name, linkedin_url=linkedin_url)
-        news_collected = True
-        for item in linkedin_news:
-            exists = db.scalar(select(CompanyNews).where(CompanyNews.article_url == item.article_url))
-            if exists:
-                continue
-            db.add(
-                CompanyNews(
-                    company_id=company.id,
-                    title=item.title,
-                    article_url=item.article_url,
-                    publisher=item.publisher,
-                    summary=item.summary,
-                    published_at=item.published_at,
-                    source="linkedin_news_rss",
-                )
-            )
+        added_counts["linkedin_news_rss"] = _add_news_items(
+            db=db,
+            company=company,
+            items=linkedin_news,
+            source="linkedin_news_rss",
+        )
     except Exception:
-        pass
+        added_counts["linkedin_news_rss"] = 0
 
-    db.flush()
-    if news_collected:
-        company.news_count = db.scalar(
-            select(func.count(CompanyNews.id)).where(CompanyNews.company_id == company.id)
-        ) or 0
+    _update_company_news_count(db=db, company=company)
+    return added_counts
+
+
+def _refresh_company_enrichment(db: Session, company: CompanyProfile) -> dict[str, int]:
+    added_counts: dict[str, int] = {}
+    try:
+        connector_results = fetch_enrichment_news(company_name=company.company_name, domain=company.primary_domain)
+    except Exception:
+        connector_results = {}
+
+    for connector_id, items in connector_results.items():
+        source = f"enrichment:{connector_id}"
+        added_counts[connector_id] = _add_news_items(db=db, company=company, items=items, source=source)
+
+    _update_company_news_count(db=db, company=company)
+    return added_counts
 
 
 def _ensure_baseline_profile(db: Session) -> CompanyProfile:
@@ -399,7 +458,7 @@ def _scrape_and_merge_source(db: Session, source: CompanySource) -> None:
         scrape = scrape_source_url(source.source_url)
     except Exception as exc:
         source.last_error = str(exc)
-        source.confidence = 0.0
+        source.confidence = 0.2
         source.http_status = None
         source.page_title = None
         source.meta_description = None
@@ -407,6 +466,19 @@ def _scrape_and_merge_source(db: Session, source: CompanySource) -> None:
         source.extracted_features_json = _dump_features([])
         source.extracted_tools_json = _dump_tools([])
         source.headings_json = json.dumps([], ensure_ascii=True)
+        fallback_company_name = infer_company_name_from_domain(source.source_domain)
+        source.detected_company_name = fallback_company_name
+        company = _resolve_or_create_company(
+            db=db,
+            company_name=fallback_company_name,
+            domain=source.source_domain,
+            source_url=source.source_url,
+        )
+        source.company_id = company.id
+        db.flush()
+        _recompute_company_profile(db, company)
+        _refresh_company_news(db, company)
+        _refresh_company_enrichment(db, company)
         return
 
     source.source_url = scrape.final_url
@@ -434,6 +506,7 @@ def _scrape_and_merge_source(db: Session, source: CompanySource) -> None:
 
     _recompute_company_profile(db, company)
     _refresh_company_news(db, company)
+    _refresh_company_enrichment(db, company)
 
 
 @app.get("/competitive-urls", response_model=list[CompetitiveURLRead])
@@ -564,6 +637,17 @@ def refresh_company_news(company_id: int, db: Session = Depends(get_db)) -> Comp
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
     _refresh_company_news(db, company)
+    db.commit()
+    return get_company_detail(company_id=company.id, db=db)
+
+
+@app.post("/companies/{company_id}/refresh-enrichment", response_model=CompanyDetailRead)
+def refresh_company_enrichment(company_id: int, db: Session = Depends(get_db)) -> CompanyDetailRead:
+    company = db.get(CompanyProfile, company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    _refresh_company_enrichment(db, company)
     db.commit()
     return get_company_detail(company_id=company.id, db=db)
 

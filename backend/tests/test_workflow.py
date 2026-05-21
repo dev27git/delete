@@ -78,9 +78,32 @@ def test_entity_merge_news_and_comparison(client, monkeypatch) -> None:
             )
         ]
 
+    def fake_enrichment_news(company_name: str, domain: str | None = None) -> dict[str, list[NewsItem]]:
+        return {
+            "techcrunch_ai": [
+                NewsItem(
+                    title=f"{company_name} covered by TechCrunch",
+                    article_url=f"https://techcrunch.example.com/{company_name.lower().replace(' ', '-')}",
+                    publisher="TechCrunch",
+                    published_at=None,
+                    summary=f"Enrichment signal for {domain or company_name}",
+                )
+            ],
+            "palo_alto_unit_42": [
+                NewsItem(
+                    title=f"{company_name} threat research mention",
+                    article_url=f"https://unit42.example.com/{company_name.lower().replace(' ', '-')}",
+                    publisher="Unit 42",
+                    published_at=None,
+                    summary="Threat research signal",
+                )
+            ],
+        }
+
     monkeypatch.setattr("app.main.scrape_source_url", fake_scrape)
     monkeypatch.setattr("app.main.fetch_company_news", fake_news)
     monkeypatch.setattr("app.main.fetch_linkedin_news", fake_linkedin_news)
+    monkeypatch.setattr("app.main.fetch_enrichment_news", fake_enrichment_news)
 
     add_company_page = client.post("/competitive-urls", json={"url": "https://lakera.ai"})
     assert add_company_page.status_code == 201
@@ -98,12 +121,18 @@ def test_entity_merge_news_and_comparison(client, monkeypatch) -> None:
     assert len(lakera["tools"]) >= 2
     assert lakera["linkedin_url"]
     assert lakera["linkedin_news_count"] >= 1
+    assert lakera["enrichment_news_count"] >= 2
+    assert lakera["news_source_counts"]["enrichment:techcrunch_ai"] == 1
 
     detail = client.get(f"/companies/{lakera['id']}")
     assert detail.status_code == 200
     detail_payload = detail.json()
     assert detail_payload["news_count"] >= 1
     assert detail_payload["sources"][0]["company_name"] == "Lakera"
+    assert any(item["source"] == "enrichment:techcrunch_ai" for item in detail_payload["news"])
+
+    refresh_enrichment = client.post(f"/companies/{lakera['id']}/refresh-enrichment")
+    assert refresh_enrichment.status_code == 200
 
     comparison = client.get("/comparison")
     assert comparison.status_code == 200

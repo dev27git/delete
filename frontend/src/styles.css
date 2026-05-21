@@ -45,7 +45,7 @@ a {
 .metric-grid {
   margin-top: 12px;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -216,6 +216,12 @@ button:disabled {
   color: #8f2525;
 }
 
+.status.partial {
+  background: #fff7df;
+  border-color: #e4ca83;
+  color: #745317;
+}
+
 .pill-wrap {
   display: flex;
   flex-wrap: wrap;
@@ -229,6 +235,35 @@ button:disabled {
   padding: 2px 6px;
   font-size: 0.72rem;
   line-height: 1.2;
+}
+
+.connector-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.connector-card {
+  border: 1px solid #d6deeb;
+  border-radius: 8px;
+  background: #fbfcff;
+  padding: 8px;
+  min-height: 76px;
+}
+
+.connector-card span,
+.connector-card small {
+  display: block;
+  color: #617088;
+  font-size: 0.72rem;
+}
+
+.connector-card strong {
+  display: block;
+  margin: 3px 0;
+  font-size: 0.82rem;
+  color: #1f2a3a;
 }
 
 .two-pane {
@@ -289,6 +324,13 @@ button:disabled {
   gap: 12px;
 }
 
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .detail-header p {
   margin: 6px 0 0;
   color: #4c586c;
@@ -308,6 +350,26 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.source-breakdown {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.source-breakdown span {
+  border: 1px solid #d1dbea;
+  border-radius: 8px;
+  background: #f7faff;
+  padding: 4px 7px;
+  color: #536075;
+  font-size: 0.76rem;
+}
+
+.source-breakdown strong {
+  color: #1f2a3a;
 }
 
 .news-list {
@@ -335,6 +397,17 @@ button:disabled {
 .news-row span {
   color: #607088;
   font-size: 0.77rem;
+}
+
+.news-row em {
+  display: inline-block;
+  margin-right: 6px;
+  border: 1px solid #cfd9eb;
+  border-radius: 8px;
+  padding: 1px 5px;
+  color: #31415b;
+  font-size: 0.7rem;
+  font-style: normal;
 }
 
 .news-mini {
@@ -378,6 +451,10 @@ button:disabled {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .connector-strip {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+
   .two-pane {
     grid-template-columns: 1fr;
   }
@@ -398,5 +475,17 @@ button:disabled {
 
   .signal-columns {
     grid-template-columns: 1fr;
+  }
+
+  .connector-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-header {
+    flex-direction: column;
+  }
+
+  .detail-actions {
+    justify-content: flex-start;
   }
 }

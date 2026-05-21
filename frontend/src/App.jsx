@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, Linkedin, Loader2, Newspaper, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowUpRight, Database, Linkedin, Loader2, Newspaper, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 import { api } from "./api";
 
@@ -14,6 +14,24 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleDateString();
+}
+
+function titleCase(value) {
+  return value
+    .replace(/[_:]/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
+}
+
+function sourceLabel(source, connectorNames = {}) {
+  if (!source) return "Unknown";
+  if (source === "google_news_rss") return "Google News";
+  if (source === "linkedin_news_rss") return "LinkedIn";
+  if (source.startsWith("enrichment:")) {
+    const connectorId = source.replace("enrichment:", "");
+    return connectorNames[connectorId] || titleCase(connectorId);
+  }
+  return titleCase(source);
 }
 
 function SignalPills({ items }) {
@@ -34,6 +52,7 @@ function App() {
   const [urlInput, setUrlInput] = useState("");
   const [sources, setSources] = useState([]);
   const [companies, setCompanies] = useState([]);
+  const [connectors, setConnectors] = useState([]);
   const [comparison, setComparison] = useState(null);
   const [selectedCompanyId, setSelectedCompanyId] = useState(null);
   const [selectedCompany, setSelectedCompany] = useState(null);
@@ -44,20 +63,23 @@ function App() {
     sourceRefreshId: null,
     sourceDeleteId: null,
     companyRefreshId: null,
+    companyEnrichmentId: null,
   });
 
   const loadOverview = async () => {
     setLoading(true);
     setError("");
     try {
-      const [nextSources, nextCompanies, nextComparison] = await Promise.all([
+      const [nextSources, nextCompanies, nextComparison, nextConnectors] = await Promise.all([
         api.listSources(),
         api.listCompanies(),
         api.getComparison(),
+        api.listEnrichmentConnectors(),
       ]);
       setSources(nextSources);
       setCompanies(nextCompanies);
       setComparison(nextComparison);
+      setConnectors(nextConnectors);
       if (!selectedCompanyId && nextCompanies.length > 0) {
         setSelectedCompanyId(nextCompanies[0].id);
       }
@@ -95,14 +117,24 @@ function App() {
     const featureTotal = companies.reduce((sum, company) => sum + company.features.length, 0);
     const toolTotal = companies.reduce((sum, company) => sum + company.tools.length, 0);
     const newsTotal = companies.reduce((sum, company) => sum + company.news_count, 0);
+    const enrichmentTotal = companies.reduce(
+      (sum, company) => sum + (company.enrichment_news_count || 0),
+      0,
+    );
     return {
       companies: companies.length,
       sources: sources.length,
       features: featureTotal,
       tools: toolTotal,
       news: newsTotal,
+      enrichment: enrichmentTotal,
     };
   }, [companies, sources]);
+
+  const connectorNames = useMemo(
+    () => Object.fromEntries(connectors.map((connector) => [connector.id, connector.name])),
+    [connectors],
+  );
 
   const addSource = async (event) => {
     event.preventDefault();
@@ -165,6 +197,20 @@ function App() {
     }
   };
 
+  const refreshCompanyEnrichment = async (companyId) => {
+    setPending((prev) => ({ ...prev, companyEnrichmentId: companyId }));
+    setError("");
+    try {
+      const detail = await api.refreshCompanyEnrichment(companyId);
+      setSelectedCompany(detail);
+      await loadOverview();
+    } catch (err) {
+      setError(err.message || "Failed to refresh source enrichment.");
+    } finally {
+      setPending((prev) => ({ ...prev, companyEnrichmentId: null }));
+    }
+  };
+
   return (
     <div className="app-shell">
       <header className="header">
@@ -202,6 +248,10 @@ function App() {
           <span>News Articles</span>
           <strong>{totals.news}</strong>
         </div>
+        <div>
+          <span>Connector Signals</span>
+          <strong>{totals.enrichment}</strong>
+        </div>
       </section>
 
       <nav className="tab-bar">
@@ -233,6 +283,16 @@ function App() {
               Add and Analyze
             </button>
           </form>
+
+          <div className="connector-strip" aria-label="Enrichment sources">
+            {connectors.map((connector) => (
+              <div key={connector.id} className="connector-card">
+                <span>{connector.category}</span>
+                <strong>{connector.name}</strong>
+                <small>{connector.site_domain}</small>
+              </div>
+            ))}
+          </div>
 
           <table className="data-table">
             <thead>
@@ -323,6 +383,7 @@ function App() {
                   <span>{company.primary_domain || "-"}</span>
                   <span>{company.source_count} sources</span>
                   <span>{company.linkedin_news_count} LinkedIn signals</span>
+                  <span>{company.enrichment_news_count || 0} connector signals</span>
                 </button>
               ))}
             </div>
@@ -349,18 +410,32 @@ function App() {
                       </a>
                     ) : null}
                   </div>
-                  <button
-                    className="icon-button"
-                    onClick={() => refreshCompanyNews(selectedCompany.id)}
-                    disabled={pending.companyRefreshId === selectedCompany.id}
-                  >
-                    {pending.companyRefreshId === selectedCompany.id ? (
-                      <Loader2 size={14} className="spin" />
-                    ) : (
-                      <Newspaper size={14} />
-                    )}
-                    Refresh News
-                  </button>
+                  <div className="detail-actions">
+                    <button
+                      className="icon-button"
+                      onClick={() => refreshCompanyNews(selectedCompany.id)}
+                      disabled={pending.companyRefreshId === selectedCompany.id}
+                    >
+                      {pending.companyRefreshId === selectedCompany.id ? (
+                        <Loader2 size={14} className="spin" />
+                      ) : (
+                        <Newspaper size={14} />
+                      )}
+                      Refresh News
+                    </button>
+                    <button
+                      className="icon-button"
+                      onClick={() => refreshCompanyEnrichment(selectedCompany.id)}
+                      disabled={pending.companyEnrichmentId === selectedCompany.id}
+                    >
+                      {pending.companyEnrichmentId === selectedCompany.id ? (
+                        <Loader2 size={14} className="spin" />
+                      ) : (
+                        <Database size={14} />
+                      )}
+                      Refresh Enrichment
+                    </button>
+                  </div>
                 </div>
 
                 <div className="signal-columns">
@@ -372,6 +447,14 @@ function App() {
                     <h3>Observed Tools</h3>
                     <SignalPills items={selectedCompany.tools} />
                   </div>
+                </div>
+
+                <div className="source-breakdown">
+                  {Object.entries(selectedCompany.news_source_counts || {}).map(([source, count]) => (
+                    <span key={source}>
+                      {sourceLabel(source, connectorNames)} <strong>{count}</strong>
+                    </span>
+                  ))}
                 </div>
 
                 <h3>Evidence Sources</h3>
@@ -422,6 +505,7 @@ function App() {
                         <div>
                           <strong>{item.title}</strong>
                           <span>
+                            <em>{sourceLabel(item.source, connectorNames)}</em>
                             {item.publisher || "Unknown source"} • {formatDate(item.published_at)}
                           </span>
                         </div>

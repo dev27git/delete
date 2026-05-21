@@ -77,6 +77,40 @@ ORG_TYPES = {
 
 ARTICLE_TYPES = {"article", "newsarticle", "blogposting", "report"}
 
+ARTICLE_COMPANY_VERBS = {
+    "acquires",
+    "adds",
+    "announces",
+    "builds",
+    "debuts",
+    "expands",
+    "introduces",
+    "launches",
+    "partners",
+    "protects",
+    "raises",
+    "releases",
+    "secures",
+    "unveils",
+    "uses",
+}
+
+HEADLINE_STOPWORDS = {
+    "a",
+    "after",
+    "an",
+    "as",
+    "how",
+    "inside",
+    "the",
+    "this",
+    "these",
+    "what",
+    "when",
+    "where",
+    "why",
+}
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -142,6 +176,10 @@ def _host_to_company(host: str) -> str:
     return part.replace("-", " ").title()
 
 
+def infer_company_name_from_domain(domain: str) -> str:
+    return _host_to_company(domain)
+
+
 def _title_to_company(title: str) -> str | None:
     if "| linkedin" in title.lower():
         first = _clean_text(title.split("|")[0])
@@ -151,6 +189,37 @@ def _title_to_company(title: str) -> str | None:
         return None
     candidate = _clean_text(parts[-1] if len(parts) > 1 else parts[0])
     if len(candidate) < 2:
+        return None
+    return candidate
+
+
+def _headline_to_company(title: str, publisher: str | None, domain: str) -> str | None:
+    headline = re.split(r"\s[\|\-–—]\s", title, maxsplit=1)[0]
+    headline = _clean_text(headline)
+    if not headline:
+        return None
+
+    verb_pattern = "|".join(sorted(ARTICLE_COMPANY_VERBS))
+    match = re.match(
+        rf"^([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){{0,3}})\s+({verb_pattern})\b",
+        headline,
+    )
+    if not match:
+        match = re.match(
+            r"^([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,2})\s+(?:is|has|will|can)\b",
+            headline,
+        )
+    if not match:
+        return None
+
+    candidate = _clean_text(match.group(1))
+    if not candidate:
+        return None
+    if candidate.lower() in HEADLINE_STOPWORDS:
+        return None
+    if publisher and normalize_company_key(candidate) == normalize_company_key(publisher):
+        return None
+    if normalize_company_key(candidate) == normalize_company_key(_host_to_company(domain)):
         return None
     return candidate
 
@@ -497,17 +566,37 @@ def scrape_source_url(url: str) -> ScrapeResult:
     if not published_at and schema_published_at:
         published_at = schema_published_at
 
-    company_name = (
-        company_from_schema
-        or extractor.meta_map.get("og:site_name")
-        or extractor.meta_map.get("application-name")
-        or _title_to_company(extractor.title)
-        or _host_to_company(extract_domain(str(response.url)))
-    )
-    company_name = _clean_text(company_name)
-
     source_type = _classify_source_type(str(response.url), is_article=is_article)
     publisher = publisher_from_schema or extractor.meta_map.get("og:site_name") or None
+    response_domain = extract_domain(str(response.url))
+
+    if source_type == "news":
+        article_company = _headline_to_company(
+            title=extractor.title,
+            publisher=publisher,
+            domain=response_domain,
+        )
+        company_name = (
+            article_company
+            or (
+                company_from_schema
+                if company_from_schema
+                and normalize_company_key(company_from_schema) != normalize_company_key(publisher or "")
+                and normalize_company_key(company_from_schema) != normalize_company_key(_host_to_company(response_domain))
+                else None
+            )
+            or _title_to_company(extractor.title)
+            or _host_to_company(response_domain)
+        )
+    else:
+        company_name = (
+            company_from_schema
+            or extractor.meta_map.get("og:site_name")
+            or extractor.meta_map.get("application-name")
+            or _title_to_company(extractor.title)
+            or _host_to_company(response_domain)
+        )
+    company_name = _clean_text(company_name)
 
     summary = _build_summary(extractor.content_blocks, fallback=meta_description)
     detection_text = " ".join(
@@ -598,6 +687,10 @@ def _fetch_news_feed(feed_url: str) -> list[NewsItem]:
         if len(items) >= MAX_NEWS_ITEMS:
             break
     return items
+
+
+def fetch_news_feed(feed_url: str) -> list[NewsItem]:
+    return _fetch_news_feed(feed_url=feed_url)
 
 
 def fetch_company_news(company_name: str, domain: str | None = None) -> list[NewsItem]:

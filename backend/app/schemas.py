@@ -52,6 +52,16 @@ class CompanyNewsRead(BaseModel):
     source: str
 
 
+class EnrichmentConnectorRead(BaseModel):
+    id: str
+    name: str
+    category: str
+    method: str
+    site_domain: str
+    requires_api_key: bool
+    enabled_by_default: bool
+
+
 class CompanySummaryRead(BaseModel):
     id: int
     company_name: str
@@ -62,6 +72,8 @@ class CompanySummaryRead(BaseModel):
     source_count: int
     news_count: int
     linkedin_news_count: int
+    enrichment_news_count: int
+    news_source_counts: dict[str, int]
     last_refreshed_at: datetime | None
     features: list[FeatureSignal]
     tools: list[ToolSignal]

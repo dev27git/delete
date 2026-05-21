@@ -18,6 +18,7 @@ async function request(path, { method = "GET", body } = {}) {
 }
 
 export const api = {
+  listEnrichmentConnectors: () => request("/enrichment-connectors"),
   listSources: () => request("/competitive-urls"),
   addSource: (body) => request("/competitive-urls", { method: "POST", body }),
   deleteSource: (id) => request(`/competitive-urls/${id}`, { method: "DELETE" }),
@@ -25,5 +26,6 @@ export const api = {
   listCompanies: () => request("/companies"),
   getCompany: (id) => request(`/companies/${id}`),
   refreshCompanyNews: (id) => request(`/companies/${id}/refresh-news`, { method: "POST" }),
+  refreshCompanyEnrichment: (id) => request(`/companies/${id}/refresh-enrichment`, { method: "POST" }),
   getComparison: () => request("/comparison"),
 };
