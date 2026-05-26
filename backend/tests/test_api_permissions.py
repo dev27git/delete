@@ -93,3 +93,21 @@ def test_enrichment_connectors_are_listed(client) -> None:
     connector_ids = {item["id"] for item in response.json()}
     assert "techcrunch_ai" in connector_ids
     assert "owasp_genai_security" in connector_ids
+
+
+def test_competitor_catalog_is_listed(client) -> None:
+    response = client.get("/competitors/catalog")
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) >= 5
+    company_names = {item["company_name"] for item in payload}
+    assert "Cyera" in company_names
+
+
+def test_decision_policy_is_listed(client) -> None:
+    response = client.get("/decision-policy")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["high_confidence_threshold"] == 0.8
+    assert payload["claim_confidence_weights"]["extraction"] == 0.45
+    assert "google_news_rss" in payload["market_signal_sources"]

@@ -140,3 +140,241 @@ def test_entity_merge_news_and_comparison(client, monkeypatch) -> None:
     assert comparison_payload["baseline_company_name"] == "Concentric AI"
     lakera_row = next(row for row in comparison_payload["competitors"] if row["company_name"] == "Lakera")
     assert lakera_row["linkedin_url"]
+
+
+def test_claims_and_ingestion_jobs(client, monkeypatch) -> None:
+    scrape_responses = [
+        ScrapeResult(
+            http_status=200,
+            final_url="https://www.lakera.ai/",
+            source_type="product",
+            page_title="Lakera Product",
+            meta_description="Lakera AI security platform",
+            headings=["Prompt Injection Defense", "AI Agent Runtime Security"],
+            summary="Lakera product evidence summary.",
+            company_name="Lakera",
+            publisher="Lakera",
+            published_at=None,
+            detected_features=[
+                FeatureHit(name="Prompt Injection Defense", category="AI Security"),
+                FeatureHit(name="AI Agent Runtime Security", category="AI Security"),
+            ],
+            detected_tools=[ToolHit(name="AWS", category="Cloud Infrastructure")],
+            confidence=0.91,
+        )
+    ]
+
+    def fake_scrape(_: str) -> ScrapeResult:
+        return scrape_responses.pop(0)
+
+    def fake_news(company_name: str, domain: str | None = None) -> list[NewsItem]:
+        return [
+            NewsItem(
+                title=f"{company_name} market signal",
+                article_url=f"https://news.example.com/{company_name.lower()}-signal",
+                publisher="Example News",
+                published_at=None,
+                summary="market signal",
+            )
+        ]
+
+    def fake_linkedin_news(company_name: str, linkedin_url: str | None = None) -> list[NewsItem]:
+        return [
+            NewsItem(
+                title=f"{company_name} linkedin signal",
+                article_url=f"https://news.example.com/{company_name.lower()}-linkedin-signal",
+                publisher="LinkedIn",
+                published_at=None,
+                summary=f"LinkedIn signal from {linkedin_url or 'derived profile'}",
+            )
+        ]
+
+    def fake_enrichment_news(company_name: str, domain: str | None = None) -> dict[str, list[NewsItem]]:
+        return {
+            "techcrunch_ai": [
+                NewsItem(
+                    title=f"{company_name} techcrunch signal",
+                    article_url=f"https://techcrunch.example.com/{company_name.lower()}-signal",
+                    publisher="TechCrunch",
+                    published_at=None,
+                    summary="enrichment signal",
+                )
+            ]
+        }
+
+    monkeypatch.setattr("app.main.scrape_source_url", fake_scrape)
+    monkeypatch.setattr("app.main.fetch_company_news", fake_news)
+    monkeypatch.setattr("app.main.fetch_linkedin_news", fake_linkedin_news)
+    monkeypatch.setattr("app.main.fetch_enrichment_news", fake_enrichment_news)
+
+    add_source = client.post("/competitive-urls", json={"url": "https://lakera.ai"})
+    assert add_source.status_code == 201
+    company_id = add_source.json()["company_id"]
+    assert company_id is not None
+
+    claims = client.get(f"/companies/{company_id}/claims")
+    assert claims.status_code == 200
+    claim_payload = claims.json()
+    claim_types = {item["claim_type"] for item in claim_payload}
+    assert "feature" in claim_types
+    assert "tool" in claim_types
+
+    refresh_news = client.post(f"/companies/{company_id}/refresh-news")
+    assert refresh_news.status_code == 200
+
+    jobs = client.get("/ingestion-jobs?limit=20")
+    assert jobs.status_code == 200
+    jobs_payload = jobs.json()
+    assert len(jobs_payload) >= 1
+    assert jobs_payload[0]["job_type"] == "company_refresh"
+    assert jobs_payload[0]["run_mode"] == "manual"
+
+
+def test_merge_review_queue_and_approval(client, monkeypatch) -> None:
+    scrape_responses = [
+        ScrapeResult(
+            http_status=200,
+            final_url="https://lakera.ai/",
+            source_type="website",
+            page_title="Lakera Platform",
+            meta_description="Lakera page",
+            headings=["AI Security"],
+            summary="Lakera summary",
+            company_name="Lakera",
+            publisher="Lakera",
+            published_at=None,
+            detected_features=[FeatureHit(name="Prompt Injection Defense", category="AI Security")],
+            detected_tools=[ToolHit(name="AWS", category="Cloud Infrastructure")],
+            confidence=0.86,
+        ),
+        ScrapeResult(
+            http_status=200,
+            final_url="https://lokera.ai/",
+            source_type="website",
+            page_title="Lokera Platform",
+            meta_description="Lokera page",
+            headings=["AI Security"],
+            summary="Lokera summary",
+            company_name="Lokera",
+            publisher="Lokera",
+            published_at=None,
+            detected_features=[FeatureHit(name="Prompt Injection Defense", category="AI Security")],
+            detected_tools=[ToolHit(name="AWS", category="Cloud Infrastructure")],
+            confidence=0.82,
+        ),
+    ]
+
+    def fake_scrape(_: str) -> ScrapeResult:
+        return scrape_responses.pop(0)
+
+    def fake_news(company_name: str, domain: str | None = None) -> list[NewsItem]:
+        return []
+
+    def fake_linkedin_news(company_name: str, linkedin_url: str | None = None) -> list[NewsItem]:
+        return []
+
+    def fake_enrichment_news(company_name: str, domain: str | None = None) -> dict[str, list[NewsItem]]:
+        return {}
+
+    monkeypatch.setattr("app.main.scrape_source_url", fake_scrape)
+    monkeypatch.setattr("app.main.fetch_company_news", fake_news)
+    monkeypatch.setattr("app.main.fetch_linkedin_news", fake_linkedin_news)
+    monkeypatch.setattr("app.main.fetch_enrichment_news", fake_enrichment_news)
+
+    first = client.post("/competitive-urls", json={"url": "https://lakera.ai"})
+    assert first.status_code == 201
+    second = client.post("/competitive-urls", json={"url": "https://lokera.ai"})
+    assert second.status_code == 201
+
+    pending = client.get("/merge-reviews?status=pending")
+    assert pending.status_code == 200
+    pending_items = pending.json()
+    assert len(pending_items) >= 1
+    review = pending_items[0]
+    assert review["detected_company_name"] == "Lokera"
+    assert review["candidate_company_name"] == "Lakera"
+
+    approved = client.post(f"/merge-reviews/{review['id']}/approve", json={})
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
+
+
+def test_auto_discover_competitors_endpoint(client, monkeypatch) -> None:
+    calls = {"news": 0, "linkedin": 0, "enrichment": 0}
+    scrape_map = {
+        "https://www.cyera.com/": ScrapeResult(
+            http_status=200,
+            final_url="https://www.cyera.com/",
+            source_type="website",
+            page_title="Cyera Platform",
+            meta_description="Cyera DSPM",
+            headings=["DSPM", "Data Security"],
+            summary="Cyera summary",
+            company_name="Cyera",
+            publisher="Cyera",
+            published_at=None,
+            detected_features=[FeatureHit(name="Data Security Posture Management", category="Security")],
+            detected_tools=[ToolHit(name="AWS", category="Cloud Infrastructure")],
+            confidence=0.84,
+        ),
+        "https://www.sentra.io/": ScrapeResult(
+            http_status=200,
+            final_url="https://www.sentra.io/",
+            source_type="website",
+            page_title="Sentra",
+            meta_description="Sentra DSPM",
+            headings=["DSPM", "Security"],
+            summary="Sentra summary",
+            company_name="Sentra",
+            publisher="Sentra",
+            published_at=None,
+            detected_features=[FeatureHit(name="Threat Detection", category="Detection")],
+            detected_tools=[ToolHit(name="Azure", category="Cloud Infrastructure")],
+            confidence=0.82,
+        ),
+    }
+
+    def fake_scrape(url: str) -> ScrapeResult:
+        return scrape_map[url]
+
+    def fake_news(company_name: str, domain: str | None = None) -> list[NewsItem]:
+        calls["news"] += 1
+        return []
+
+    def fake_linkedin_news(company_name: str, linkedin_url: str | None = None) -> list[NewsItem]:
+        calls["linkedin"] += 1
+        return []
+
+    def fake_enrichment_news(company_name: str, domain: str | None = None) -> dict[str, list[NewsItem]]:
+        calls["enrichment"] += 1
+        return {}
+
+    def fake_candidates(max_count: int = 40, include_news: bool = False):
+        from app.discovery import CompetitorCandidate
+
+        return [
+            CompetitorCandidate(company_name="Cyera", url="https://www.cyera.com/", segment="DSPM", source="catalog"),
+            CompetitorCandidate(company_name="Sentra", url="https://www.sentra.io/", segment="DSPM", source="catalog"),
+        ][:max_count]
+
+    monkeypatch.setattr("app.main.scrape_source_url", fake_scrape)
+    monkeypatch.setattr("app.main.fetch_company_news", fake_news)
+    monkeypatch.setattr("app.main.fetch_linkedin_news", fake_linkedin_news)
+    monkeypatch.setattr("app.main.fetch_enrichment_news", fake_enrichment_news)
+    monkeypatch.setattr("app.main.discover_competitor_candidates", fake_candidates)
+
+    response = client.post("/competitors/auto-discover?max_candidates=10&include_news=false")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["candidates_considered"] == 2
+    assert payload["added_sources"] == 2
+    assert payload["failed_sources"] == 0
+    assert calls["news"] == 0
+    assert calls["linkedin"] == 0
+    assert calls["enrichment"] == 0
+
+    companies = client.get("/companies")
+    assert companies.status_code == 200
+    names = {row["company_name"] for row in companies.json()}
+    assert "Cyera" in names
+    assert "Sentra" in names

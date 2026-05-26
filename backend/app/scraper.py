@@ -111,6 +111,41 @@ HEADLINE_STOPWORDS = {
     "why",
 }
 
+INVALID_COMPANY_NAME_MARKERS = {
+    "access denied",
+    "attention required",
+    "bot verification",
+    "captcha",
+    "checking your browser",
+    "cloudflare",
+    "enable javascript",
+    "error",
+    "forbidden",
+    "human verification",
+    "just a moment",
+    "not found",
+    "page unavailable",
+    "request blocked",
+    "security check",
+    "service unavailable",
+    "too many requests",
+    "unauthorized",
+    "verify you are human",
+}
+
+GENERIC_NON_COMPANY_MARKERS = {
+    "home",
+    "redesign",
+    "documentation",
+    "docs",
+    "knowledge base",
+    "privacy policy",
+    "terms of service",
+    "terms of use",
+    "sign in",
+    "log in",
+}
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -178,6 +213,40 @@ def _host_to_company(host: str) -> str:
 
 def infer_company_name_from_domain(domain: str) -> str:
     return _host_to_company(domain)
+
+
+def _sanitize_company_name(candidate: str | None, domain: str) -> str:
+    fallback = _host_to_company(domain)
+    if not candidate:
+        return fallback
+
+    cleaned = _clean_text(candidate)
+    if len(cleaned) < 2:
+        return fallback
+
+    lowered = cleaned.lower()
+    if any(marker in lowered for marker in INVALID_COMPANY_NAME_MARKERS):
+        return fallback
+    if any(marker in lowered for marker in GENERIC_NON_COMPANY_MARKERS):
+        return fallback
+    if "http://" in lowered or "https://" in lowered or "www." in lowered:
+        return fallback
+    if lowered.startswith("reference #"):
+        return fallback
+    if "|" in cleaned or ":" in cleaned:
+        return fallback
+    if len(cleaned) > 72:
+        return fallback
+    if len(cleaned.split()) > 7:
+        return fallback
+
+    letters = sum(1 for char in cleaned if char.isalpha())
+    if letters < 2:
+        return fallback
+    if letters / max(len(cleaned), 1) < 0.35:
+        return fallback
+
+    return cleaned
 
 
 def _title_to_company(title: str) -> str | None:
@@ -596,7 +665,7 @@ def scrape_source_url(url: str) -> ScrapeResult:
             or _title_to_company(extractor.title)
             or _host_to_company(response_domain)
         )
-    company_name = _clean_text(company_name)
+    company_name = _sanitize_company_name(company_name, response_domain)
 
     summary = _build_summary(extractor.content_blocks, fallback=meta_description)
     detection_text = " ".join(

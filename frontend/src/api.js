@@ -18,14 +18,27 @@ async function request(path, { method = "GET", body } = {}) {
 }
 
 export const api = {
+  getDecisionPolicy: () => request("/decision-policy"),
   listEnrichmentConnectors: () => request("/enrichment-connectors"),
+  autoDiscoverCompetitors: ({ maxCandidates = 30, includeNews = true, refreshMarketSignals = false } = {}) =>
+    request(
+      `/competitors/auto-discover?max_candidates=${maxCandidates}&include_news=${includeNews ? "true" : "false"}&refresh_market_signals=${refreshMarketSignals ? "true" : "false"}`,
+      { method: "POST" },
+    ),
+  listCompetitorCatalog: () => request("/competitors/catalog"),
   listSources: () => request("/competitive-urls"),
   addSource: (body) => request("/competitive-urls", { method: "POST", body }),
   deleteSource: (id) => request(`/competitive-urls/${id}`, { method: "DELETE" }),
   rescrapeSource: (id) => request(`/competitive-urls/${id}/rescrape`, { method: "POST" }),
   listCompanies: () => request("/companies"),
   getCompany: (id) => request(`/companies/${id}`),
+  listCompanyClaims: (id) => request(`/companies/${id}/claims`),
   refreshCompanyNews: (id) => request(`/companies/${id}/refresh-news`, { method: "POST" }),
   refreshCompanyEnrichment: (id) => request(`/companies/${id}/refresh-enrichment`, { method: "POST" }),
+  listMergeReviews: (status = "pending") => request(`/merge-reviews?status=${encodeURIComponent(status)}`),
+  approveMergeReview: (id, body = {}) => request(`/merge-reviews/${id}/approve`, { method: "POST", body }),
+  rejectMergeReview: (id, body = {}) => request(`/merge-reviews/${id}/reject`, { method: "POST", body }),
+  listIngestionJobs: (limit = 50) => request(`/ingestion-jobs?limit=${limit}`),
+  runIngestionCycle: () => request("/ingestion-jobs/run-cycle", { method: "POST" }),
   getComparison: () => request("/comparison"),
 };

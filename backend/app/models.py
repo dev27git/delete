@@ -188,6 +188,12 @@ class CompanyProfile(Base):
 
     sources: Mapped[list[CompanySource]] = relationship(back_populates="company", cascade="all, delete-orphan")
     news_items: Mapped[list[CompanyNews]] = relationship(back_populates="company", cascade="all, delete-orphan")
+    claims: Mapped[list[CompanyClaim]] = relationship(back_populates="company", cascade="all, delete-orphan")
+    merge_reviews_as_candidate: Mapped[list[CompanyMergeReview]] = relationship(
+        back_populates="candidate_company",
+        cascade="all, delete-orphan",
+    )
+    ingestion_jobs: Mapped[list[IngestionJob]] = relationship(back_populates="company", cascade="all, delete-orphan")
 
 
 class CompanySource(Base):
@@ -214,6 +220,7 @@ class CompanySource(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
 
     company: Mapped[CompanyProfile | None] = relationship(back_populates="sources")
+    merge_reviews: Mapped[list[CompanyMergeReview]] = relationship(back_populates="source", cascade="all, delete-orphan")
 
 
 class CompanyNews(Base):
@@ -230,3 +237,77 @@ class CompanyNews(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
     company: Mapped[CompanyProfile] = relationship(back_populates="news_items")
+
+
+class CompanyClaim(Base):
+    __tablename__ = "company_claims"
+    __table_args__ = (
+        UniqueConstraint("company_id", "claim_type", "claim_value", name="uq_company_claim"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("company_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    claim_type: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    claim_value: Mapped[str] = mapped_column(String(260), nullable=False, index=True)
+    category: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    source_tier: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    source_type: Mapped[str] = mapped_column(String(80), nullable=False, default="website")
+    source_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    evidence_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    last_verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    company: Mapped[CompanyProfile] = relationship(back_populates="claims")
+
+
+class CompanyMergeReview(Base):
+    __tablename__ = "company_merge_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("company_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    candidate_company_id: Mapped[int] = mapped_column(
+        ForeignKey("company_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    detected_company_name: Mapped[str] = mapped_column(String(220), nullable=False)
+    detected_company_key: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    candidate_company_name: Mapped[str] = mapped_column(String(220), nullable=False)
+    candidate_company_key: Mapped[str] = mapped_column(String(220), nullable=False, index=True)
+    similarity_score: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="pending", index=True)
+    reviewer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    source: Mapped[CompanySource] = relationship(back_populates="merge_reviews")
+    candidate_company: Mapped[CompanyProfile] = relationship(back_populates="merge_reviews_as_candidate")
+
+
+class IngestionJob(Base):
+    __tablename__ = "ingestion_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    job_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    run_mode: Mapped[str] = mapped_column(String(40), nullable=False, default="manual", index=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="queued", index=True)
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("company_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    company: Mapped[CompanyProfile | None] = relationship(back_populates="ingestion_jobs")
