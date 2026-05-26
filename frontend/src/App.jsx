@@ -2,18 +2,25 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   BarChart3,
+  Building2,
   Check,
   Database,
+  Globe,
+  Link2,
   Linkedin,
   Radar,
   Loader2,
+  Moon,
   Newspaper,
   PlayCircle,
   Plus,
   RefreshCw,
   Search,
   ShieldCheck,
+  Sparkles,
+  Sun,
   Trash2,
+  Wrench,
   X,
 } from "lucide-react";
 
@@ -138,6 +145,7 @@ function App() {
   const [comparison, setComparison] = useState(null);
   const [selectedCompanyId, setSelectedCompanyId] = useState(null);
   const [selectedCompany, setSelectedCompany] = useState(null);
+  const [themeMode, setThemeMode] = useState("dark");
   const [companyQuery, setCompanyQuery] = useState("");
   const [decisionPolicy, setDecisionPolicy] = useState(null);
   const [autoDiscoverResult, setAutoDiscoverResult] = useState(null);
@@ -205,6 +213,21 @@ function App() {
       setError(err.message || "Failed to load company detail.");
     }
   };
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem("cci-theme");
+    if (stored === "light" || stored === "dark") {
+      setThemeMode(stored);
+      return;
+    }
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    setThemeMode(prefersDark ? "dark" : "light");
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", themeMode);
+    window.localStorage.setItem("cci-theme", themeMode);
+  }, [themeMode]);
 
   useEffect(() => {
     loadOverview();
@@ -420,6 +443,10 @@ function App() {
     }
   };
 
+  const toggleTheme = () => {
+    setThemeMode((prev) => (prev === "dark" ? "light" : "dark"));
+  };
+
   return (
     <div className="app-shell">
       <header className="header">
@@ -431,10 +458,21 @@ function App() {
             feature/tool signals, and pulls market news for comparison against Concentric AI.
           </p>
         </div>
-        <button className="icon-button" onClick={loadOverview} title="Refresh everything">
-          <RefreshCw size={16} />
-          Refresh
-        </button>
+        <div className="header-actions">
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            title={`Switch to ${themeMode === "dark" ? "light" : "dark"} theme`}
+          >
+            <Sun size={14} className={themeMode === "light" ? "active" : ""} />
+            <span>{themeMode === "dark" ? "Dark" : "Light"}</span>
+            <Moon size={14} className={themeMode === "dark" ? "active" : ""} />
+          </button>
+          <button className="icon-button" onClick={loadOverview} title="Refresh everything">
+            <RefreshCw size={16} />
+            Refresh
+          </button>
+        </div>
       </header>
 
       <section className="metric-grid">
@@ -605,7 +643,10 @@ function App() {
           <aside className="surface list-pane">
             <div className="panel-head">
               <div>
-                <h2>Company Entities</h2>
+                <h2 className="heading-with-icon">
+                  <Building2 size={18} />
+                  Company Entities
+                </h2>
                 <p>
                   {filteredCompanies.length} of {companies.length} companies
                 </p>
@@ -629,17 +670,37 @@ function App() {
                     onClick={() => setSelectedCompanyId(company.id)}
                   >
                     <div className="company-card-head">
-                      <div className="company-card-title">
-                        <strong>{company.company_name}</strong>
-                        <span>{company.primary_domain || "-"}</span>
+                      <div className="company-card-identity">
+                        <span className="company-avatar" aria-hidden="true">
+                          {(company.company_name || "?").charAt(0).toUpperCase()}
+                        </span>
+                        <div className="company-card-title">
+                          <strong>{company.company_name}</strong>
+                          <span>
+                            <Globe size={12} />
+                            <span className="company-domain-text">{company.primary_domain || "-"}</span>
+                          </span>
+                        </div>
                       </div>
                       <span className="company-card-score">{company.high_confidence_claim_count || 0}</span>
                     </div>
                     <div className="company-card-metrics">
-                      <span>{company.source_count} sources</span>
-                      <span>{company.news_count} signals</span>
-                      <span>{company.linkedin_news_count} LinkedIn</span>
-                      <span>{company.enrichment_news_count || 0} connectors</span>
+                      <span>
+                        <Link2 size={12} />
+                        {company.source_count} sources
+                      </span>
+                      <span>
+                        <Newspaper size={12} />
+                        {company.news_count} signals
+                      </span>
+                      <span>
+                        <Linkedin size={12} />
+                        {company.linkedin_news_count} LinkedIn
+                      </span>
+                      <span>
+                        <Database size={12} />
+                        {company.enrichment_news_count || 0} connectors
+                      </span>
                     </div>
                   </button>
                 ))
@@ -654,11 +715,15 @@ function App() {
               <>
                 <div className="detail-header">
                   <div>
-                    <h2>{selectedCompany.company_name}</h2>
+                    <h2 className="heading-with-icon">
+                      <Building2 size={18} />
+                      {selectedCompany.company_name}
+                    </h2>
                     <p className="company-summary">{cleanSummary(selectedCompany.description)}</p>
                     <div className="company-links">
                       {selectedCompany.website_url ? (
                         <a href={selectedCompany.website_url} target="_blank" rel="noreferrer" className="inline-link">
+                          <Globe size={14} />
                           Website
                         </a>
                       ) : null}
@@ -772,43 +837,70 @@ function App() {
 
                 <div className="company-kpi-grid">
                   <div className="kpi-item">
-                    <span>Primary Domain</span>
+                    <span className="kpi-label">
+                      <Globe size={13} />
+                      Primary Domain
+                    </span>
                     <strong>{selectedCompany.primary_domain || "-"}</strong>
                   </div>
                   <div className="kpi-item">
-                    <span>Linked Sources</span>
+                    <span className="kpi-label">
+                      <Link2 size={13} />
+                      Linked Sources
+                    </span>
                     <strong>{selectedCompany.source_count}</strong>
                   </div>
                   <div className="kpi-item">
-                    <span>Total News</span>
+                    <span className="kpi-label">
+                      <Newspaper size={13} />
+                      Total News
+                    </span>
                     <strong>{selectedCompany.news_count}</strong>
                   </div>
                   <div className="kpi-item">
-                    <span>Connector Signals</span>
+                    <span className="kpi-label">
+                      <Database size={13} />
+                      Connector Signals
+                    </span>
                     <strong>{selectedCompany.enrichment_news_count || 0}</strong>
                   </div>
                   <div className="kpi-item">
-                    <span>LinkedIn Signals</span>
+                    <span className="kpi-label">
+                      <Linkedin size={13} />
+                      LinkedIn Signals
+                    </span>
                     <strong>{selectedCompany.linkedin_news_count || 0}</strong>
                   </div>
                   <div className="kpi-item">
-                    <span>High-Confidence Claims</span>
+                    <span className="kpi-label">
+                      <Sparkles size={13} />
+                      High-Confidence Claims
+                    </span>
                     <strong>{selectedCompany.high_confidence_claim_count || 0}</strong>
                   </div>
                 </div>
 
                 <div className="signal-columns">
                   <div>
-                    <h3>Supported Features</h3>
+                    <h3 className="heading-with-icon">
+                      <ShieldCheck size={15} />
+                      Supported Features
+                    </h3>
                     <SignalPills items={selectedCompany.features} />
                   </div>
                   <div>
-                    <h3>Observed Tools</h3>
+                    <h3 className="heading-with-icon">
+                      <Wrench size={15} />
+                      Observed Tools
+                    </h3>
                     <SignalPills items={selectedCompany.tools} />
                   </div>
                 </div>
 
-                <h3>Evidence-Backed Claims</h3>
+                <h3 className="heading-with-icon">
+                  <Check size={15} />
+                  Evidence-Backed Claims
+                </h3>
                 <table className="data-table compact claims-table">
                   <thead>
                     <tr>
@@ -848,7 +940,10 @@ function App() {
                   </tbody>
                 </table>
 
-                <h3>Market Signal Decisioning</h3>
+                <h3 className="heading-with-icon">
+                  <Radar size={15} />
+                  Market Signal Decisioning
+                </h3>
                 <table className="data-table compact market-signal-table">
                   <thead>
                     <tr>
@@ -874,7 +969,10 @@ function App() {
                   </tbody>
                 </table>
 
-                <h3>Evidence Sources</h3>
+                <h3 className="heading-with-icon">
+                  <Link2 size={15} />
+                  Evidence Sources
+                </h3>
                 <table className="data-table compact evidence-source-table">
                   <thead>
                     <tr>
