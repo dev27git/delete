@@ -33,6 +33,12 @@ const VIEWS = [
   { id: "ops", label: "Ops Console" },
 ];
 
+const THEME_OPTIONS = [
+  { id: "light", label: "Light", icon: Sun },
+  { id: "dark", label: "Dark", icon: Moon },
+  { id: "heritage", label: "Heritage", icon: Sparkles },
+];
+
 function formatDate(value) {
   if (!value) return "-";
   const date = new Date(value);
@@ -216,7 +222,7 @@ function App() {
 
   useEffect(() => {
     const stored = window.localStorage.getItem("cci-theme");
-    if (stored === "light" || stored === "dark") {
+    if (THEME_OPTIONS.some((theme) => theme.id === stored)) {
       setThemeMode(stored);
       return;
     }
@@ -443,10 +449,6 @@ function App() {
     }
   };
 
-  const toggleTheme = () => {
-    setThemeMode((prev) => (prev === "dark" ? "light" : "dark"));
-  };
-
   return (
     <div className="app-shell">
       <header className="header">
@@ -459,15 +461,25 @@ function App() {
           </p>
         </div>
         <div className="header-actions">
-          <button
-            className="theme-toggle"
-            onClick={toggleTheme}
-            title={`Switch to ${themeMode === "dark" ? "light" : "dark"} theme`}
-          >
-            <Sun size={14} className={themeMode === "light" ? "active" : ""} />
-            <span>{themeMode === "dark" ? "Dark" : "Light"}</span>
-            <Moon size={14} className={themeMode === "dark" ? "active" : ""} />
-          </button>
+          <div className="theme-switcher" role="radiogroup" aria-label="Theme selector">
+            {THEME_OPTIONS.map((theme) => {
+              const Icon = theme.icon;
+              const isActive = themeMode === theme.id;
+              return (
+                <button
+                  key={theme.id}
+                  type="button"
+                  className={`theme-option ${isActive ? "active" : ""}`}
+                  onClick={() => setThemeMode(theme.id)}
+                  aria-pressed={isActive}
+                  title={`${theme.label} theme`}
+                >
+                  <Icon size={14} />
+                  <span>{theme.label}</span>
+                </button>
+              );
+            })}
+          </div>
           <button className="icon-button" onClick={loadOverview} title="Refresh everything">
             <RefreshCw size={16} />
             Refresh

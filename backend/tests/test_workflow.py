@@ -1,3 +1,4 @@
+from app.discovery import CompetitorCandidate
 from app.scraper import FeatureHit, NewsItem, ScrapeResult, ToolHit
 
 
@@ -228,6 +229,61 @@ def test_claims_and_ingestion_jobs(client, monkeypatch) -> None:
     assert len(jobs_payload) >= 1
     assert jobs_payload[0]["job_type"] == "company_refresh"
     assert jobs_payload[0]["run_mode"] == "manual"
+
+
+def test_auto_discovery_dedupes_redirect_collisions(client, monkeypatch) -> None:
+    duplicate_final_url = "https://www.intellistack.com/?utm_source=or-redirect&utm_medium=referral"
+
+    def fake_discover(max_count: int = 40, include_news: bool = False) -> list[CompetitorCandidate]:
+        return [
+            CompetitorCandidate(
+                company_name="Intellistack Landing A",
+                url="https://www.formstack.com/redirect-a",
+                segment="Discovered",
+                source="test",
+            ),
+            CompetitorCandidate(
+                company_name="Intellistack Landing B",
+                url="https://www.formstack.com/redirect-b",
+                segment="Discovered",
+                source="test",
+            ),
+        ][:max_count]
+
+    def fake_scrape(_: str) -> ScrapeResult:
+        return ScrapeResult(
+            http_status=200,
+            final_url=duplicate_final_url,
+            source_type="website",
+            page_title="Intellistack Landing",
+            meta_description="Intellistack AI workflows",
+            headings=["Intellistack", "AI-Native No-Code Workflows"],
+            summary="Intellistack summary.",
+            company_name="Intellistack",
+            publisher="Intellistack",
+            published_at=None,
+            detected_features=[],
+            detected_tools=[ToolHit(name="Salesforce", category="CRM")],
+            confidence=0.7,
+        )
+
+    monkeypatch.setattr("app.main.discover_competitor_candidates", fake_discover)
+    monkeypatch.setattr("app.main.scrape_source_url", fake_scrape)
+
+    response = client.post(
+        "/competitors/auto-discover?max_candidates=60&include_news=false&refresh_market_signals=false"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["added_sources"] == 1
+    assert payload["skipped_existing"] >= 1
+    assert len(payload["urls_added"]) == 1
+    assert payload["urls_added"][0] == duplicate_final_url
+
+    sources = client.get("/competitive-urls")
+    assert sources.status_code == 200
+    source_rows = sources.json()
+    assert len(source_rows) == 1
 
 
 def test_merge_review_queue_and_approval(client, monkeypatch) -> None:

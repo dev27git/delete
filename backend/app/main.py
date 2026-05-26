@@ -1017,7 +1017,7 @@ def _scrape_and_merge_source(
     db: Session,
     source: CompanySource,
     refresh_market_signals: bool = True,
-) -> None:
+) -> CompanySource:
     source.scraped_at = _now()
     source.last_error = None
     try:
@@ -1047,37 +1047,54 @@ def _scrape_and_merge_source(
         if refresh_market_signals:
             _refresh_company_news(db, company)
             _refresh_company_enrichment(db, company)
-        return
+        return source
 
-    source.source_url = scrape.final_url
-    source.source_domain = extract_domain(scrape.final_url)
-    source.source_type = scrape.source_type
-    source.detected_company_name = scrape.company_name
-    source.http_status = scrape.http_status
-    source.page_title = scrape.page_title
-    source.meta_description = scrape.meta_description
-    source.summary = scrape.summary
-    source.published_at = scrape.published_at
-    source.headings_json = json.dumps(scrape.headings, ensure_ascii=True)
-    source.extracted_features_json = _dump_features(_dedupe_feature_hits(scrape.detected_features))
-    source.extracted_tools_json = _dump_tools(_dedupe_tool_hits(scrape.detected_tools))
-    source.confidence = scrape.confidence
+    final_url = normalize_url(scrape.final_url) or source.source_url
+    duplicate = db.scalar(
+        select(CompanySource).where(
+            CompanySource.source_url == final_url,
+            CompanySource.id != source.id,
+        )
+    )
+
+    active_source = source
+    if duplicate:
+        # Redirected URLs may collapse to an already tracked canonical source.
+        # Reuse the existing row and remove the temporary duplicate record.
+        active_source = duplicate
+        db.delete(source)
+        db.flush()
+
+    active_source.source_url = final_url
+    active_source.source_domain = extract_domain(final_url)
+    active_source.source_type = scrape.source_type
+    active_source.detected_company_name = scrape.company_name
+    active_source.http_status = scrape.http_status
+    active_source.page_title = scrape.page_title
+    active_source.meta_description = scrape.meta_description
+    active_source.summary = scrape.summary
+    active_source.published_at = scrape.published_at
+    active_source.headings_json = json.dumps(scrape.headings, ensure_ascii=True)
+    active_source.extracted_features_json = _dump_features(_dedupe_feature_hits(scrape.detected_features))
+    active_source.extracted_tools_json = _dump_tools(_dedupe_tool_hits(scrape.detected_tools))
+    active_source.confidence = scrape.confidence
 
     company = _resolve_or_create_company(
         db=db,
         company_name=scrape.company_name,
-        domain=source.source_domain,
-        source_url=scrape.final_url,
-        source=source,
+        domain=active_source.source_domain,
+        source_url=final_url,
+        source=active_source,
     )
-    source.company_id = company.id
+    active_source.company_id = company.id
     db.flush()
-    _refresh_claims_from_source(db=db, company=company, source=source)
+    _refresh_claims_from_source(db=db, company=company, source=active_source)
 
     _recompute_company_profile(db, company)
     if refresh_market_signals:
         _refresh_company_news(db, company)
         _refresh_company_enrichment(db, company)
+    return active_source
 
 
 @app.get("/competitive-urls", response_model=list[CompetitiveURLRead])
@@ -1114,7 +1131,7 @@ def add_competitive_url(payload: CompetitiveURLCreate, db: Session = Depends(get
     db.add(source)
     db.flush()
 
-    _scrape_and_merge_source(db=db, source=source)
+    source = _scrape_and_merge_source(db=db, source=source)
     db.commit()
     db.refresh(source)
     return _serialize_source(source)
@@ -1161,12 +1178,18 @@ def auto_discover_competitors(
         db.add(source)
         db.flush()
 
-        _scrape_and_merge_source(
+        created_source_id = source.id
+        source = _scrape_and_merge_source(
             db=db,
             source=source,
             refresh_market_signals=refresh_market_signals,
         )
         existing_domains.add(domain)
+        existing_domains.add(_canonical_domain(source.source_url))
+        if source.id != created_source_id:
+            skipped_existing += 1
+            continue
+
         urls_added.append(source.source_url)
         if source.last_error and source.company_id is None:
             failed_sources += 1
@@ -1191,7 +1214,7 @@ def rescrape_competitive_url(source_id: int, db: Session = Depends(get_db)) -> C
     if not source:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
 
-    _scrape_and_merge_source(db=db, source=source)
+    source = _scrape_and_merge_source(db=db, source=source)
 
     db.commit()
     db.refresh(source)
