@@ -624,18 +624,22 @@ function App() {
                 filteredCompanies.map((company) => (
                   <button
                     key={company.id}
+                    type="button"
                     className={`company-card ${selectedCompanyId === company.id ? "active" : ""}`}
                     onClick={() => setSelectedCompanyId(company.id)}
                   >
-                    <div className="company-card-top">
-                      <strong>{company.company_name}</strong>
-                      <span>{company.primary_domain || "-"}</span>
+                    <div className="company-card-head">
+                      <div className="company-card-title">
+                        <strong>{company.company_name}</strong>
+                        <span>{company.primary_domain || "-"}</span>
+                      </div>
+                      <span className="company-card-score">{company.high_confidence_claim_count || 0}</span>
                     </div>
                     <div className="company-card-metrics">
                       <span>{company.source_count} sources</span>
+                      <span>{company.news_count} signals</span>
                       <span>{company.linkedin_news_count} LinkedIn</span>
-                      <span>{company.enrichment_news_count || 0} connector</span>
-                      <span>{company.high_confidence_claim_count || 0} high-confidence</span>
+                      <span>{company.enrichment_news_count || 0} connectors</span>
                     </div>
                   </button>
                 ))
