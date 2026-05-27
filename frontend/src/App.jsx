@@ -1,24 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowUpRight,
+  Activity,
   BarChart3,
   Building2,
   Check,
   Database,
+  Gauge,
   Globe,
+  Layers3,
   Link2,
   Linkedin,
   Radar,
   Loader2,
   Moon,
+  Droplets,
   Newspaper,
   PlayCircle,
   Plus,
   RefreshCw,
   Search,
   ShieldCheck,
+  Snowflake,
   Sparkles,
   Sun,
+  Target,
   Trash2,
   Wrench,
   X,
@@ -27,16 +33,28 @@ import {
 import { api } from "./api";
 
 const VIEWS = [
-  { id: "sources", label: "Source Intake" },
-  { id: "companies", label: "Company Intelligence" },
-  { id: "comparison", label: "Concentric Gap View" },
-  { id: "ops", label: "Ops Console" },
+  { id: "sources", label: "Source Intake", icon: Plus },
+  { id: "companies", label: "Company Intelligence", icon: Building2 },
+  { id: "comparison", label: "Concentric Gap View", icon: Target },
+  { id: "ops", label: "Ops Console", icon: Activity },
 ];
 
 const THEME_OPTIONS = [
   { id: "light", label: "Light", icon: Sun },
   { id: "dark", label: "Dark", icon: Moon },
+  { id: "liquid", label: "Liquid Glass", icon: Droplets },
+  { id: "frosted", label: "Frosted Glass", icon: Snowflake },
   { id: "heritage", label: "Heritage", icon: Sparkles },
+];
+
+const METRIC_WIDGETS = [
+  { key: "companies", label: "Tracked Companies", icon: Building2 },
+  { key: "sources", label: "Source URLs", icon: Link2 },
+  { key: "features", label: "Detected Features", icon: ShieldCheck },
+  { key: "tools", label: "Detected Tools", icon: Wrench },
+  { key: "news", label: "News Articles", icon: Newspaper },
+  { key: "enrichment", label: "Market Signals", icon: Radar },
+  { key: "highClaims", label: "High-Confidence Claims", icon: Check },
 ];
 
 function formatDate(value) {
@@ -70,6 +88,27 @@ function compactText(value, maxChars = 260) {
   if (!text) return "-";
   if (text.length <= maxChars) return text;
   return `${text.slice(0, maxChars).trimEnd()}...`;
+}
+
+function truncateText(value, maxChars = 180) {
+  if (!value) return { text: "-", fullText: "", truncated: false };
+  const fullText = String(value).replace(/\s+/g, " ").trim();
+  if (!fullText) return { text: "-", fullText: "", truncated: false };
+  if (fullText.length <= maxChars) return { text: fullText, fullText, truncated: false };
+  return { text: `${fullText.slice(0, maxChars).trimEnd()}...`, fullText, truncated: true };
+}
+
+function formatScore(value) {
+  const score = Number(value || 0);
+  return score.toFixed(2);
+}
+
+function scoreBand(score, maxScore) {
+  if (!maxScore) return "Low";
+  const ratio = score / maxScore;
+  if (ratio >= 0.72) return "High";
+  if (ratio >= 0.38) return "Medium";
+  return "Low";
 }
 
 function looksLikeBlockedText(value) {
@@ -137,6 +176,78 @@ function SignalPills({ items }) {
         </span>
       ))}
     </div>
+  );
+}
+
+function ExpandableCellText({ text, maxChars = 170 }) {
+  const [expanded, setExpanded] = useState(false);
+  const snippet = useMemo(() => truncateText(text, maxChars), [text, maxChars]);
+
+  if (!snippet.fullText) {
+    return <span className="muted">-</span>;
+  }
+
+  if (!snippet.truncated) {
+    return <span>{snippet.fullText}</span>;
+  }
+
+  return (
+    <span className="expandable-text">
+      <span>{expanded ? snippet.fullText : snippet.text}</span>
+      <button
+        type="button"
+        className="read-more-link"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        {expanded ? "Show less" : "Read more"}
+      </button>
+    </span>
+  );
+}
+
+function LiquidGlassFilterDefs() {
+  return (
+    <svg className="liquid-glass-filter" aria-hidden="true" focusable="false">
+      <defs>
+        <filter id="liquid-glass-refraction" colorInterpolationFilters="sRGB">
+          <feTurbulence
+            type="fractalNoise"
+            baseFrequency="0.018 0.024"
+            numOctaves="2"
+            seed="7"
+            result="liquidNoise"
+          />
+          <feDisplacementMap
+            in="SourceGraphic"
+            in2="liquidNoise"
+            scale="10"
+            xChannelSelector="R"
+            yChannelSelector="G"
+            result="refracted"
+          />
+          <feGaussianBlur in="refracted" stdDeviation="0.18" result="softRefracted" />
+          <feSpecularLighting
+            in="liquidNoise"
+            surfaceScale="2.6"
+            specularConstant="0.55"
+            specularExponent="24"
+            lightingColor="#ffffff"
+            result="specularLight"
+          >
+            <feDistantLight azimuth="-55" elevation="58" />
+          </feSpecularLighting>
+          <feComposite in="specularLight" in2="softRefracted" operator="in" result="specularMask" />
+          <feColorMatrix
+            in="softRefracted"
+            type="matrix"
+            values="1.05 0 0 0 0  0 1.05 0 0 0  0 0 1.08 0 0  0 0 0 1 0"
+            result="boostedGlass"
+          />
+          <feBlend in="boostedGlass" in2="specularMask" mode="screen" />
+        </filter>
+      </defs>
+    </svg>
   );
 }
 
@@ -308,6 +419,36 @@ function App() {
     }));
   }, [selectedCompany, connectorNames, connectorsById]);
 
+  const comparisonSummary = useMemo(() => {
+    const competitors = comparison?.competitors || [];
+    const maxGapScore = competitors.reduce((max, row) => Math.max(max, row.gap_score || 0), 0);
+    const totalFeatureGaps = competitors.reduce(
+      (sum, row) => sum + (row.competitor_only_features?.length || 0),
+      0,
+    );
+    const totalToolGaps = competitors.reduce(
+      (sum, row) => sum + (row.competitor_only_tools?.length || 0),
+      0,
+    );
+    const totalMarketSignals = competitors.reduce(
+      (sum, row) => sum + (row.market_signal_count ?? row.top_news?.length ?? 0),
+      0,
+    );
+    const averageGap =
+      competitors.length === 0
+        ? 0
+        : competitors.reduce((sum, row) => sum + (row.gap_score || 0), 0) / competitors.length;
+    return {
+      averageGap,
+      competitors,
+      maxGapScore,
+      topCompetitor: competitors[0],
+      totalFeatureGaps,
+      totalMarketSignals,
+      totalToolGaps,
+    };
+  }, [comparison]);
+
   const addSource = async (event) => {
     event.preventDefault();
     setError("");
@@ -451,6 +592,7 @@ function App() {
 
   return (
     <div className="app-shell">
+      <LiquidGlassFilterDefs />
       <header className="header">
         <div>
           <span className="hero-kicker">Concentric AI</span>
@@ -488,47 +630,37 @@ function App() {
       </header>
 
       <section className="metric-grid">
-        <div className="metric-card">
-          <span>Tracked Companies</span>
-          <strong>{totals.companies}</strong>
-        </div>
-        <div className="metric-card">
-          <span>Source URLs</span>
-          <strong>{totals.sources}</strong>
-        </div>
-        <div className="metric-card">
-          <span>Detected Features</span>
-          <strong>{totals.features}</strong>
-        </div>
-        <div className="metric-card">
-          <span>Detected Tools</span>
-          <strong>{totals.tools}</strong>
-        </div>
-        <div className="metric-card">
-          <span>News Articles</span>
-          <strong>{totals.news}</strong>
-        </div>
-        <div className="metric-card">
-          <span>Connector Signals</span>
-          <strong>{totals.enrichment}</strong>
-        </div>
-        <div className="metric-card">
-          <span>High-Confidence Claims</span>
-          <strong>{totals.highClaims}</strong>
-        </div>
+        {METRIC_WIDGETS.map((metric) => {
+          const MetricIcon = metric.icon;
+          return (
+            <div className="metric-card" key={metric.key}>
+              <div className="metric-card-head">
+                <span className="metric-icon" aria-hidden="true">
+                  <MetricIcon size={14} />
+                </span>
+                <span>{metric.label}</span>
+              </div>
+              <strong>{totals[metric.key]}</strong>
+            </div>
+          );
+        })}
       </section>
 
       <nav className="tab-bar">
-        {VIEWS.map((view) => (
-          <button
-            key={view.id}
-            className={activeView === view.id ? "active" : ""}
-            type="button"
-            onClick={() => setActiveView(view.id)}
-          >
-            {view.label}
-          </button>
-        ))}
+        {VIEWS.map((view) => {
+          const ViewIcon = view.icon;
+          return (
+            <button
+              key={view.id}
+              className={activeView === view.id ? "active" : ""}
+              type="button"
+              onClick={() => setActiveView(view.id)}
+            >
+              <ViewIcon size={15} />
+              {view.label}
+            </button>
+          );
+        })}
       </nav>
 
       {error ? <p className="error-banner">{error}</p> : null}
@@ -919,6 +1051,7 @@ function App() {
                       <th>Claim</th>
                       <th>Type</th>
                       <th>Confidence</th>
+                      <th>Status</th>
                       <th>Tier</th>
                       <th>Corroboration</th>
                       <th>Last Verified</th>
@@ -929,25 +1062,34 @@ function App() {
                   <tbody>
                     {(selectedCompany.claims || []).length === 0 ? (
                       <tr>
-                        <td colSpan={8}>No evidence-backed claims yet.</td>
+                        <td colSpan={9}>No evidence-backed claims yet.</td>
                       </tr>
                     ) : (
-                      selectedCompany.claims.slice(0, 25).map((claim) => (
-                        <tr key={claim.id}>
-                          <td>{claim.claim_value}</td>
-                          <td>{titleCase(claim.claim_type)}</td>
-                          <td>{Math.round(claim.confidence * 100)}%</td>
-                          <td>{claim.source_tier.toFixed(2)}</td>
-                          <td>{claim.source_count} sources</td>
-                          <td>{formatDate(claim.last_verified_at)}</td>
-                          <td>{titleCase(claim.source_type)} + freshness + corroboration</td>
-                          <td>
-                            <a href={claim.source_url} target="_blank" rel="noreferrer">
-                              {compactText(claim.evidence_snippet || "Open source evidence", 120)}
-                            </a>
-                          </td>
-                        </tr>
-                      ))
+                      selectedCompany.claims.slice(0, 25).map((claim) => {
+                        const isVerified =
+                          claim.confidence >= (decisionPolicy?.high_confidence_threshold ?? 0.8);
+                        return (
+                          <tr key={claim.id}>
+                            <td>{claim.claim_value}</td>
+                            <td>{titleCase(claim.claim_type)}</td>
+                            <td>{Math.round(claim.confidence * 100)}%</td>
+                            <td>
+                              <span className={`status ${isVerified ? "verified" : "observed"}`}>
+                                {isVerified ? "Verified" : "Observed"}
+                              </span>
+                            </td>
+                            <td>{claim.source_tier.toFixed(2)}</td>
+                            <td>{claim.source_count} sources</td>
+                            <td>{formatDate(claim.last_verified_at)}</td>
+                            <td>{titleCase(claim.source_type)} + freshness + corroboration</td>
+                            <td>
+                              <a href={claim.source_url} target="_blank" rel="noreferrer">
+                                {compactText(claim.evidence_snippet || "Open source evidence", 120)}
+                              </a>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -974,7 +1116,9 @@ function App() {
                         <tr key={row.source}>
                           <td>{row.label}</td>
                           <td>{row.count}</td>
-                          <td>{row.basis}</td>
+                          <td>
+                            <ExpandableCellText text={row.basis} maxChars={160} />
+                          </td>
                         </tr>
                       ))
                     )}
@@ -1050,14 +1194,68 @@ function App() {
       ) : null}
 
       {activeView === "comparison" && comparison ? (
-        <section className="surface">
-          <h2>Competitor Gaps vs {comparison.baseline_company_name}</h2>
-          <table className="data-table">
+        <section className="surface comparison-surface">
+          <div className="comparison-hero">
+            <div>
+              <h2 className="heading-with-icon">
+                <Target size={18} />
+                Competitor Gaps vs {comparison.baseline_company_name}
+              </h2>
+              <p className="section-subtitle">
+                Prioritized by differentiated features, observed tools, and market signal volume so product gaps are
+                visible without opening every company profile.
+              </p>
+            </div>
+            <div className="score-formula">
+              <Gauge size={16} />
+              <span>Gap score</span>
+              <strong>features x1.8 + tools x1.2 + signals x0.15</strong>
+            </div>
+          </div>
+
+          <div className="gap-overview-grid">
+            <article className="insight-card">
+              <span>
+                <Target size={14} />
+                Top Gap
+              </span>
+              <strong>{comparisonSummary.topCompetitor?.company_name || "-"}</strong>
+              <small>{formatScore(comparisonSummary.topCompetitor?.gap_score)} score</small>
+            </article>
+            <article className="insight-card">
+              <span>
+                <Gauge size={14} />
+                Average Gap
+              </span>
+              <strong>{formatScore(comparisonSummary.averageGap)}</strong>
+              <small>{comparisonSummary.competitors.length} competitors ranked</small>
+            </article>
+            <article className="insight-card">
+              <span>
+                <Layers3 size={14} />
+                Product Gaps
+              </span>
+              <strong>{comparisonSummary.totalFeatureGaps + comparisonSummary.totalToolGaps}</strong>
+              <small>
+                {comparisonSummary.totalFeatureGaps} features / {comparisonSummary.totalToolGaps} tools
+              </small>
+            </article>
+            <article className="insight-card">
+              <span>
+                <Radar size={14} />
+                Market Signals
+              </span>
+              <strong>{comparisonSummary.totalMarketSignals}</strong>
+              <small>news and connector evidence</small>
+            </article>
+          </div>
+
+          <table className="data-table comparison-table">
             <thead>
               <tr>
                 <th>Competitor</th>
                 <th>Gap Score</th>
-                <th>LinkedIn</th>
+                <th>Score Drivers</th>
                 <th>Features Concentric Lacks</th>
                 <th>Tools Concentric Lacks</th>
                 <th>Latest Market Signals</th>
@@ -1069,41 +1267,87 @@ function App() {
                   <td colSpan={6}>No competitor profiles yet.</td>
                 </tr>
               ) : (
-                comparison.competitors.map((row) => (
-                  <tr key={row.company_id}>
-                    <td>{row.company_name}</td>
-                    <td>{row.gap_score.toFixed(2)}</td>
-                    <td>
-                      {row.linkedin_url ? (
-                        <a href={row.linkedin_url} target="_blank" rel="noreferrer" className="inline-link">
-                          LinkedIn
-                        </a>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-                    <td>
-                      <SignalPills items={row.competitor_only_features.slice(0, 8)} />
-                    </td>
-                    <td>
-                      <SignalPills items={row.competitor_only_tools.slice(0, 8)} />
-                    </td>
-                    <td>
-                      <div className="news-mini">
-                        {row.top_news.slice(0, 3).map((news) => (
-                          <a
-                            key={`${row.company_id}-${news.id}`}
-                            href={news.article_url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {news.title}
-                          </a>
-                        ))}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                comparison.competitors.map((row) => {
+                  const scorePercent = comparisonSummary.maxGapScore
+                    ? Math.max(4, Math.round((row.gap_score / comparisonSummary.maxGapScore) * 100))
+                    : 0;
+                  const featureImpact =
+                    row.feature_gap_score ?? (row.competitor_only_features?.length || 0) * 1.8;
+                  const toolImpact = row.tool_gap_score ?? (row.competitor_only_tools?.length || 0) * 1.2;
+                  const signalImpact = row.market_signal_score ?? (row.market_signal_count || 0) * 0.15;
+                  return (
+                    <tr key={row.company_id}>
+                      <td>
+                        <div className="competitor-cell">
+                          <strong>{row.company_name}</strong>
+                          <div className="competitor-meta">
+                            {row.linkedin_url ? (
+                              <a href={row.linkedin_url} target="_blank" rel="noreferrer" className="inline-link">
+                                <Linkedin size={12} />
+                                LinkedIn
+                              </a>
+                            ) : null}
+                            <span>{row.shared_feature_count ?? row.shared_features?.length ?? 0} shared features</span>
+                            <span>{row.shared_tool_count ?? row.shared_tools?.length ?? 0} shared tools</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="score-stack">
+                          <div className="score-line">
+                            <strong>{formatScore(row.gap_score)}</strong>
+                            <span>{scoreBand(row.gap_score, comparisonSummary.maxGapScore)} gap</span>
+                          </div>
+                          <div className="score-bar" aria-hidden="true">
+                            <span style={{ width: `${scorePercent}%` }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="driver-stack">
+                          <span>
+                            <Layers3 size={12} />
+                            Features <strong>{formatScore(featureImpact)}</strong>
+                          </span>
+                          <span>
+                            <Wrench size={12} />
+                            Tools <strong>{formatScore(toolImpact)}</strong>
+                          </span>
+                          <span>
+                            <Radar size={12} />
+                            Signals <strong>{formatScore(signalImpact)}</strong>
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <SignalPills items={row.competitor_only_features.slice(0, 8)} />
+                      </td>
+                      <td>
+                        <SignalPills items={row.competitor_only_tools.slice(0, 8)} />
+                      </td>
+                      <td>
+                        <div className="news-mini">
+                          {row.top_news.slice(0, 3).map((news) => {
+                            const title = truncateText(news.title, 120);
+                            return (
+                              <a
+                                key={`${row.company_id}-${news.id}`}
+                                href={news.article_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="news-mini-link"
+                              >
+                                <span>{title.text}</span>
+                                {title.truncated ? <span className="news-mini-more">Read more</span> : null}
+                              </a>
+                            );
+                          })}
+                          {row.top_news.length === 0 ? <span className="muted">No recent signals</span> : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

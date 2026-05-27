@@ -169,6 +169,12 @@ class CompetitorComparisonRead(BaseModel):
     company_name: str
     linkedin_url: str | None
     gap_score: float
+    feature_gap_score: float
+    tool_gap_score: float
+    market_signal_score: float
+    market_signal_count: int
+    shared_feature_count: int
+    shared_tool_count: int
     competitor_only_features: list[FeatureSignal]
     competitor_only_tools: list[ToolSignal]
     shared_features: list[FeatureSignal]

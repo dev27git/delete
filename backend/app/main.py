@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import Select, func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
 from .database import Base, SessionLocal, engine, get_db
@@ -1421,11 +1422,23 @@ def run_ingestion_cycle(db: Session = Depends(get_db)) -> dict[str, int]:
 
 
 @app.get("/comparison", response_model=ComparisonRead)
-def get_comparison(db: Session = Depends(get_db)) -> ComparisonRead:
+def get_comparison(
+    refresh_baseline: bool = Query(
+        default=False,
+        description="When true, refreshes Concentric baseline news before comparison. Default is read-only for API stability.",
+    ),
+    db: Session = Depends(get_db),
+) -> ComparisonRead:
     baseline = _ensure_baseline_profile(db)
-    _recompute_company_profile(db, baseline)
-    _refresh_company_news(db, baseline)
-    db.commit()
+    if refresh_baseline:
+        try:
+            _recompute_company_profile(db, baseline)
+            _refresh_company_news(db, baseline)
+            db.commit()
+        except OperationalError:
+            # Keep comparison endpoint available even when concurrent write traffic temporarily locks SQLite.
+            db.rollback()
+            baseline = db.get(CompanyProfile, baseline.id) or baseline
 
     baseline_features = _load_features(baseline.feature_set_json)
     baseline_tools = _load_tools(baseline.tool_set_json)
@@ -1459,12 +1472,10 @@ def get_comparison(db: Session = Depends(get_db)) -> ComparisonRead:
         shared_features = [item for key, item in competitor_feature_map.items() if key in baseline_feature_map]
         shared_tools = [item for key, item in competitor_tool_map.items() if key in baseline_tool_map]
 
-        gap_score = round(
-            len(competitor_only_features) * 1.8
-            + len(competitor_only_tools) * 1.2
-            + (competitor.news_count * 0.15),
-            2,
-        )
+        feature_gap_score = round(len(competitor_only_features) * 1.8, 2)
+        tool_gap_score = round(len(competitor_only_tools) * 1.2, 2)
+        market_signal_score = round(competitor.news_count * 0.15, 2)
+        gap_score = round(feature_gap_score + tool_gap_score + market_signal_score, 2)
 
         news = sorted(
             competitor.news_items,
@@ -1477,6 +1488,12 @@ def get_comparison(db: Session = Depends(get_db)) -> ComparisonRead:
                 company_name=competitor.company_name,
                 linkedin_url=_resolve_company_linkedin_url(competitor),
                 gap_score=gap_score,
+                feature_gap_score=feature_gap_score,
+                tool_gap_score=tool_gap_score,
+                market_signal_score=market_signal_score,
+                market_signal_count=competitor.news_count,
+                shared_feature_count=len(shared_features),
+                shared_tool_count=len(shared_tools),
                 competitor_only_features=sorted(competitor_only_features, key=lambda item: (item.category, item.name)),
                 competitor_only_tools=sorted(competitor_only_tools, key=lambda item: (item.category, item.name)),
                 shared_features=sorted(shared_features, key=lambda item: (item.category, item.name)),
