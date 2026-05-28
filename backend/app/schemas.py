@@ -17,6 +17,7 @@ class ToolSignal(BaseModel):
 
 class CompetitiveURLCreate(BaseModel):
     url: str = Field(min_length=3, max_length=1000)
+    analysis_workspace_id: int | None = None
 
 
 class CompetitiveURLRead(BaseModel):
@@ -76,6 +77,8 @@ class EnrichmentConnectorRead(BaseModel):
     site_domain: str
     requires_api_key: bool
     enabled_by_default: bool
+    target_url: str
+    strategic_value: str
 
 
 class DecisionPolicyRead(BaseModel):
@@ -164,6 +167,64 @@ class AutoDiscoverResponse(BaseModel):
     errors: list[str]
 
 
+class AnalysisWorkspaceCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    description: str | None = Field(default=None, max_length=800)
+    market_domain: str | None = Field(default=None, max_length=180)
+    target_company_id: int | None = None
+    company_ids: list[int] = Field(default_factory=list)
+    competitor_company_ids: list[int] | None = None
+
+
+class AnalysisWorkspaceUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    description: str | None = Field(default=None, max_length=800)
+    market_domain: str | None = Field(default=None, max_length=180)
+    target_company_id: int | None = None
+    company_ids: list[int] | None = None
+    competitor_company_ids: list[int] | None = None
+
+
+class WorkspaceRetargetRequest(BaseModel):
+    workspace_id: int | None = None
+    new_target_company_id: int | None = None
+    domain: str | None = Field(default=None, max_length=300)
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    competitor_company_ids: list[int] | None = None
+    company_ids: list[int] | None = None
+    force_rescrape: bool = False
+
+
+class AnalysisWorkspaceRead(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    market_domain: str | None = None
+    target_company_id: int | None = None
+    target_company_name: str | None = None
+    default_focus_company_id: int | None = None
+    default_focus_company_name: str | None = None
+    company_ids: list[int]
+    company_count: int
+    competitor_company_ids: list[int]
+    competitor_count: int
+    status: str
+    status_message: str | None = None
+    target_version: int
+    retarget_job_id: int | None = None
+    recalculated_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkspaceRetargetResponse(BaseModel):
+    workspace: AnalysisWorkspaceRead
+    job_id: int
+    status: str
+    target_company_id: int | None = None
+    target_company_name: str | None = None
+
+
 class CompetitorComparisonRead(BaseModel):
     company_id: int
     company_name: str
@@ -183,6 +244,14 @@ class CompetitorComparisonRead(BaseModel):
 
 
 class ComparisonRead(BaseModel):
+    analysis_workspace_id: int | None = None
+    analysis_workspace_name: str | None = None
+    workspace_status: str | None = None
+    workspace_status_message: str | None = None
+    target_version: int | None = None
+    focus_anchor_company_id: int | None = None
+    focus_anchor_company_name: str | None = None
+    baseline_company_id: int | None = None
     baseline_company_name: str
     baseline_features: list[FeatureSignal]
     baseline_tools: list[ToolSignal]
@@ -248,6 +317,15 @@ class BriefingRecommendationRead(BaseModel):
 
 class BriefingRead(BaseModel):
     date: datetime
+    analysis_workspace_id: int | None = None
+    analysis_workspace_name: str | None = None
+    workspace_status: str | None = None
+    workspace_status_message: str | None = None
+    target_version: int | None = None
+    focus_anchor_company_id: int | None = None
+    focus_anchor_company_name: str | None = None
+    baseline_company_id: int | None = None
+    baseline_company_name: str
     summary: str
     top_insights: list[BriefingInsightRead]
     urgent_signals: list[BriefingInsightRead]
@@ -260,6 +338,9 @@ class BriefingRead(BaseModel):
 
 class AskConcentricRequest(BaseModel):
     question: str = Field(min_length=3, max_length=600)
+    analysis_workspace_id: int | None = None
+    baseline_company_id: int | None = None
+    focus_anchor_company_id: int | None = None
 
 
 class AskConcentricResponse(BaseModel):

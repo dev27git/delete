@@ -41,6 +41,13 @@ TOOL_KEYWORDS: dict[str, tuple[str, str]] = {
     "power bi": ("Power BI", "Analytics"),
     "looker": ("Looker", "Analytics"),
     "salesforce": ("Salesforce", "CRM"),
+    "hubspot": ("HubSpot", "CRM"),
+    "dynamics 365": ("Microsoft Dynamics 365", "CRM"),
+    "microsoft dynamics": ("Microsoft Dynamics 365", "CRM"),
+    "google workspace": ("Google Workspace", "Productivity"),
+    "microsoft 365": ("Microsoft 365", "Productivity"),
+    "office 365": ("Microsoft 365", "Productivity"),
+    "m365": ("Microsoft 365", "Productivity"),
     "oracle": ("Oracle", "Database"),
     "mongodb": ("MongoDB", "Database"),
     "postgresql": ("PostgreSQL", "Database"),
@@ -48,21 +55,51 @@ TOOL_KEYWORDS: dict[str, tuple[str, str]] = {
     "openai": ("OpenAI", "AI Provider"),
     "anthropic": ("Anthropic", "AI Provider"),
     "hugging face": ("Hugging Face", "AI Platform"),
+    "collibra": ("Collibra", "Data Governance Platform"),
+    "informatica": ("Informatica", "Data Management Platform"),
+    "alation": ("Alation", "Data Intelligence Platform"),
+    "atlan": ("Atlan", "Data Governance Platform"),
+    "onetrust": ("OneTrust", "Privacy Management Platform"),
+    "talend": ("Talend", "Data Integration Platform"),
+    "boomi": ("Boomi", "Integration Platform"),
+    "mulesoft": ("MuleSoft", "Integration Platform"),
+    "servicenow": ("ServiceNow", "Operations"),
+    "datadog": ("Datadog", "Observability"),
+    "dynatrace": ("Dynatrace", "Observability"),
+    "new relic": ("New Relic", "Observability"),
     "rubrik security cloud": ("Rubrik Security Cloud", "Data Security Platform"),
     "tenable one": ("Tenable One", "Exposure Management"),
     "opentext data security": ("OpenText Data Security", "Data Security Platform"),
     "intellistack": ("Intellistack", "Workflow Automation"),
     "formstack": ("Formstack", "Workflow Automation"),
+    "confluence": ("Confluence", "Work Management"),
 }
 
 FEATURE_PATTERNS: list[tuple[str, str, str]] = [
     (r"\bdata security\b|\bprotects? enterprise data\b", "Data Security", "Security"),
     (r"\bdata security posture management\b|\bdspm\b", "Data Security Posture Management", "Security"),
-    (r"\bdata discovery\b|\bdiscover sensitive data\b", "Sensitive Data Discovery", "Discovery"),
-    (r"\bdata classification\b|\bclassify data\b", "Data Classification", "Discovery"),
+    (
+        r"\bdata discovery\b|\bdiscover sensitive data\b|\bfinds? sensitive (?:data|records?)\b|"
+        r"\bfinding sensitive (?:data|records?)\b|\bcatalogs? sensitive (?:data|records?)\b|"
+        r"\binventory sensitive (?:data|records?)\b|\blocates? sensitive (?:data|records?)\b",
+        "Sensitive Data Discovery",
+        "Discovery",
+    ),
+    (
+        r"\bdata classification\b|\bclassify data\b|\bclassif(?:y|ies|ication) sensitive\b|"
+        r"\bcatalogs? sensitive (?:data|records?)\b|\btag sensitive (?:data|records?)\b|"
+        r"\blabel sensitive (?:data|records?)\b",
+        "Data Classification",
+        "Discovery",
+    ),
     (r"\bsensitive data protection\b|\bdata protection\b", "Sensitive Data Protection", "Security"),
     (r"\bdata loss prevention\b|\bdlp\b", "Data Loss Prevention", "Prevention"),
     (r"\brisk prioritization\b|\brisk scoring\b", "Risk Prioritization", "Risk"),
+    (r"\brisk analytics\b|\brisk insights\b|\brisk dashboards?\b|\bquantif(?:y|ies) risk\b", "Risk Analytics", "Risk"),
+    (r"\bcrm\b|\bcustomer relationship management\b", "Customer Relationship Management", "Sales"),
+    (r"\bintegration platform\b|\bapi integration\b|\bconnectors?\b", "Integration Platform", "Integration"),
+    (r"\bobservability\b|\bmonitoring\b|\bapplication performance\b|\bapm\b", "Observability", "Observability"),
+    (r"\bdata integration\b|\betl\b|\bdata pipeline\b", "Data Integration", "Data Infrastructure"),
     (r"\binsider risk\b", "Insider Risk Detection", "Risk"),
     (r"\baccess governance\b|\baccess control\b", "Access Governance", "Governance"),
     (r"\bpolicy automation\b|\bautomated policy\b", "Policy Automation", "Governance"),
@@ -82,27 +119,160 @@ FEATURE_PATTERNS: list[tuple[str, str, str]] = [
     (r"\besignature\b|\be-signature\b|\belectronic signature\b|\bcollect esignatures\b", "Electronic Signature", "Automation"),
     (r"\bcontract lifecycle\b|\bcontract lifecycle management\b", "Contract Lifecycle Management", "Automation"),
     (r"\bforms\b|\bcustom forms\b|\bbuild forms\b", "Form Automation", "Automation"),
-    (r"\bdata fabric\b", "Data Fabric", "Data Infrastructure"),
+    (r"\bdata fabric\b|\bmetadata fabric\b|\bunified data layer\b", "Data Fabric", "Data Infrastructure"),
     (r"\bprompt injection\b|\bindirect prompt injection\b", "Prompt Injection Defense", "AI Security"),
-    (r"\bai security\b|\bmodel security\b|\bllm security\b", "AI Security Controls", "AI Security"),
+    (
+        r"\bai security\b|\bmodel security\b|\bllm security\b|\bai guardrails?\b|\bllm guardrails?\b|"
+        r"\bmodel risk\b|\bsecure ai\b|\bai threat\b",
+        "AI Security Controls",
+        "AI Security",
+    ),
     (r"\bagent security\b|\bai agent security\b", "AI Agent Runtime Security", "AI Security"),
-    (r"\bcompliance\b|\bregulatory\b", "Compliance Reporting", "Compliance"),
-    (r"\bdata governance\b", "Data Governance", "Governance"),
+    (
+        r"\bcompliance reporting\b|\bcompliance reports?\b|\baudit ready\b|\baudit-ready\b|"
+        r"\baudit logs?\b|\baudit trails?\b|\bgdpr\b|\bsox\b|\bhipaa\b|\bpci dss\b|\bregulatory reporting\b",
+        "Compliance Reporting",
+        "Compliance",
+    ),
+    (r"\bdata governance\b|\bdata stewardship\b|\bgovernance workflows?\b|\bdata catalog\b", "Data Governance", "Governance"),
     (r"\binformation governance\b|\binformation management\b", "Information Governance", "Governance"),
+    (
+        r"\bprivacy management\b|\bprivacy governance\b|\bprivacy rights\b|\bdata subject requests?\b|"
+        r"\bdsar\b|\bconsent management\b",
+        "Privacy Management",
+        "Privacy",
+    ),
 ]
 
+NOISE_SEGMENT_PATTERNS = (
+    r"\bcookie policy\b",
+    r"\bcookie preferences?\b",
+    r"\bcookie settings?\b",
+    r"\bprivacy policy\b",
+    r"\bterms of (?:service|use)\b",
+    r"\ball rights reserved\b",
+    r"\bgoogle analytics\b",
+    r"\bgoogle tag manager\b",
+    r"\brecaptcha\b",
+    r"\bcookiebot\b",
+    r"\bwordpress\b",
+    r"\bmarketing cookies?\b",
+    r"\banalytics cookies?\b",
+)
+
 DOMAIN_FEATURE_HINTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "alation.com": (
+        ("Data Governance", "Governance"),
+        ("Data Classification", "Discovery"),
+        ("Compliance Reporting", "Compliance"),
+    ),
+    "atlan.com": (
+        ("Data Governance", "Governance"),
+        ("Data Fabric", "Data Infrastructure"),
+        ("Data Classification", "Discovery"),
+    ),
+    "boomi.com": (
+        ("Integration Platform", "Integration"),
+        ("Workflow Automation", "Automation"),
+    ),
+    "collibra.com": (
+        ("Data Governance", "Governance"),
+        ("Sensitive Data Discovery", "Discovery"),
+        ("Data Classification", "Discovery"),
+    ),
+    "datadoghq.com": (
+        ("Observability", "Observability"),
+        ("Cloud Security", "Cloud"),
+        ("Compliance Reporting", "Compliance"),
+    ),
+    "dynatrace.com": (
+        ("Observability", "Observability"),
+        ("Application Performance Monitoring", "Observability"),
+    ),
+    "hubspot.com": (
+        ("Customer Relationship Management", "Sales"),
+        ("Workflow Automation", "Automation"),
+    ),
+    "informatica.com": (
+        ("Data Governance", "Governance"),
+        ("Data Fabric", "Data Infrastructure"),
+        ("Data Integration", "Data Infrastructure"),
+    ),
+    "intellistack.com": (
+        ("Workflow Automation", "Automation"),
+        ("No-Code Workflow Builder", "Automation"),
+        ("Document Generation", "Automation"),
+        ("Electronic Signature", "Automation"),
+        ("Contract Lifecycle Management", "Automation"),
+        ("Form Automation", "Automation"),
+    ),
+    "mulesoft.com": (
+        ("Integration Platform", "Integration"),
+        ("Workflow Automation", "Automation"),
+    ),
+    "newrelic.com": (
+        ("Observability", "Observability"),
+        ("Application Performance Monitoring", "Observability"),
+    ),
+    "onetrust.com": (
+        ("Privacy Management", "Privacy"),
+        ("Data Governance", "Governance"),
+        ("Compliance Reporting", "Compliance"),
+    ),
+    "opentext.com": (
+        ("Data Security", "Security"),
+        ("Information Governance", "Governance"),
+        ("Data Governance", "Governance"),
+        ("Compliance Reporting", "Compliance"),
+    ),
     "rubrik.com": (
         ("Cyber Resilience", "Resilience"),
         ("Data Backup and Recovery", "Resilience"),
         ("Ransomware Recovery", "Resilience"),
         ("Data Security", "Security"),
     ),
+    "salesforce.com": (
+        ("Customer Relationship Management", "Sales"),
+        ("Workflow Automation", "Automation"),
+    ),
+    "servicenow.com": (
+        ("Workflow Automation", "Automation"),
+        ("Integration Platform", "Integration"),
+    ),
+    "talend.com": (
+        ("Data Integration", "Data Infrastructure"),
+        ("Data Governance", "Governance"),
+    ),
+    "tenable.com": (
+        ("Exposure Management", "Exposure"),
+        ("Vulnerability Management", "Exposure"),
+        ("Attack Surface Management", "Exposure"),
+        ("Cyber Risk Reduction", "Risk"),
+    ),
 }
 
 DOMAIN_TOOL_HINTS: dict[str, tuple[tuple[str, str], ...]] = {
-    "rubrik.com": (("Rubrik Security Cloud", "Data Security Platform"),),
+    "alation.com": (("Alation", "Data Intelligence Platform"),),
+    "atlan.com": (("Atlan", "Data Governance Platform"),),
+    "boomi.com": (("Boomi", "Integration Platform"),),
+    "collibra.com": (("Collibra", "Data Governance Platform"),),
+    "datadoghq.com": (("Datadog", "Observability"),),
+    "dynatrace.com": (("Dynatrace", "Observability"),),
+    "hubspot.com": (("HubSpot", "CRM"),),
+    "informatica.com": (("Informatica", "Data Management Platform"),),
+    "intellistack.com": (
+        ("Intellistack", "Workflow Automation"),
+        ("Formstack", "Workflow Automation"),
+    ),
+    "mulesoft.com": (("MuleSoft", "Integration Platform"),),
+    "newrelic.com": (("New Relic", "Observability"),),
+    "onetrust.com": (("OneTrust", "Privacy Management Platform"),),
     "opentext.com": (("OpenText Data Security", "Data Security Platform"),),
+    "rubrik.com": (("Rubrik Security Cloud", "Data Security Platform"),),
+    "salesforce.com": (("Salesforce", "CRM"),),
+    "servicenow.com": (("ServiceNow", "Operations"),),
+    "talend.com": (("Talend", "Data Integration Platform"),),
+    "tenable.com": (("Tenable One", "Exposure Management"),),
 }
 
 ORG_TYPES = {
@@ -597,22 +767,44 @@ def _dedupe_tool_hits(items: list[ToolHit]) -> list[ToolHit]:
     return result
 
 
+def _signal_text_segments(text: str) -> list[str]:
+    normalized = re.sub(r"[-_/]+", " ", text.lower())
+    segments = re.split(r"(?<=[.!?])\s+|\n+|[•|]", normalized)
+    product_segments: list[str] = []
+    for segment in segments:
+        cleaned = _clean_text(segment)
+        if not cleaned:
+            continue
+        if any(re.search(pattern, cleaned) for pattern in NOISE_SEGMENT_PATTERNS):
+            continue
+        product_segments.append(cleaned)
+    return product_segments
+
+
 def _extract_features(text: str) -> list[FeatureHit]:
     hits: list[FeatureHit] = []
-    lowered = re.sub(r"[-_/]+", " ", text.lower())
+    searchable_text = " ".join(_signal_text_segments(text))
     for pattern, feature_name, category in FEATURE_PATTERNS:
-        if re.search(pattern, lowered, flags=re.IGNORECASE):
+        if re.search(pattern, searchable_text, flags=re.IGNORECASE):
             hits.append(FeatureHit(name=feature_name, category=category))
     return _dedupe_feature_hits(hits)
 
 
 def _extract_tools(text: str) -> list[ToolHit]:
-    lowered = re.sub(r"[-_/]+", " ", text.lower())
+    segments = _signal_text_segments(text)
     hits: list[ToolHit] = []
     for needle, (label, category) in TOOL_KEYWORDS.items():
-        if needle in lowered:
+        if any(_contains_tool_keyword(segment, needle) for segment in segments):
             hits.append(ToolHit(name=label, category=category))
     return _dedupe_tool_hits(hits)
+
+
+def _contains_tool_keyword(segment: str, needle: str) -> bool:
+    if not segment or not needle:
+        return False
+    if re.search(rf"\b{re.escape(needle)}\b", segment):
+        return True
+    return False
 
 
 def _domain_feature_hints(url: str) -> list[FeatureHit]:

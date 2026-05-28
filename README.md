@@ -1,7 +1,8 @@
-# Concentric Competitive Intelligence Platform
+# Competitive Intelligence Control Center
 
-Competitive analysis workspace for Concentric AI. The app ingests competitor URLs, extracts product signals, enriches
-company profiles with market evidence, and compares competitors against the Concentric baseline.
+Generic competitive analysis workspace for tracking one or more unrelated markets. The app ingests competitor URLs,
+extracts product signals, enriches company profiles with market evidence, and compares selected competitors against the
+target company you choose.
 
 ## What It Does
 
@@ -14,7 +15,8 @@ company profiles with market evidence, and compares competitors against the Conc
 - Pulls market signals from Google News RSS, LinkedIn-targeted Google News RSS, and source-scoped enrichment connectors.
 - Filters news and connector results for company relevance before storage and again when reading stored records.
 - Discovers competitors from a curated catalog and optional news discovery.
-- Computes comparison rows against the `https://concentric.ai/` baseline.
+- Supports saved analysis workspaces as peer company pools for unrelated markets.
+- Computes comparison rows against either the default baseline, an ad hoc target company, or a workspace focus anchor.
 - Supports optional AI feature/tool enrichment through OpenAI or a local OpenAI-compatible model server.
 - Exposes a local MCP server so Codex can inspect and refresh enrichment data directly.
 
@@ -40,6 +42,110 @@ company profiles with market evidence, and compares competitors against the Conc
 7. Market news and enrichment connectors are refreshed unless bulk discovery disables market refresh for speed.
 
 If a source redirects to an existing canonical source, the duplicate row is collapsed into the existing source.
+
+## Analysis Workspaces And Focus Anchors
+
+The product is no longer limited to one Concentric-only competitive set. A workspace is now a neutral market sandbox: it
+groups peer companies that belong in the same analysis pool. The target/focus company is selected separately at viewing
+time.
+
+Examples:
+
+- Workspace A: AI security market with `Lakera`, `HiddenLayer`, `Prompt Security`, and `Concentric AI`.
+- Workspace B: CRM market with `Salesforce`, `HubSpot`, and `Microsoft Dynamics`.
+- Workspace C: Cyber resilience market with `Rubrik`, `Cohesity`, and `Veeam`.
+
+Each workspace stores:
+
+- `name`: human-readable market or use-case name.
+- `description`: optional notes for the market sandbox.
+- `market_domain`: required for zero-input autonomous discovery, for example `Data Governance`, `CRM`, or `Cyber Resilience`.
+- `company_ids`: the tracked peer companies in the sandbox.
+- `target_company_id`: legacy/default focus fallback kept for existing local databases and API compatibility.
+
+When `analysis_workspace_id` is supplied, `/briefing`, `/comparison`, and `/ai/ask` restrict results to that workspace's
+company pool. Pass `focus_anchor_company_id` to decide which company is used as the baseline lens. The selected focus
+anchor is always excluded from comparison rows, but it remains a normal member of the workspace pool so users can switch
+the lens without editing the workspace.
+
+Example:
+
+```bash
+curl "http://127.0.0.1:8000/comparison?analysis_workspace_id=3&focus_anchor_company_id=12"
+```
+
+The old default still exists as a fallback: if no workspace, focus anchor, or target company is supplied, the API can
+seed and use the Concentric AI baseline so existing local data keeps working.
+
+### Zero-Input Workspace Creation
+
+New workspace creation no longer requires company selection or seed URLs. The UI sends only:
+
+```json
+{
+  "name": "Data Governance Suite",
+  "market_domain": "Data Governance",
+  "description": "Optional market notes"
+}
+```
+
+The API creates the workspace immediately with `status=discovering_market`, records a
+`workspace_landscape_discovery` job, and starts the autonomous discovery worker. The UI closes the editor and shows the
+workspace briefing canvas with `Autonomous Analyst Spinning Up...` while these phases run:
+
+1. `discovering_market`: select the first 5-7 vendor candidates for the market domain.
+2. `hydrating_entities`: resolve domains, create source rows, scrape pages, and merge companies.
+3. `extracting_signals`: create workspace-local feature/tool snapshots from linked sources.
+4. `calculating_gaps`: choose the first discovered leader as the default focus anchor and build the initial gap matrix.
+5. `ready`: normal briefing, company, source, and gap views become available.
+
+Discovery currently uses the local curated catalog and deterministic matching. If `WORKSPACE_DISCOVERY_INLINE=1` is set,
+the worker runs inline, which is useful for tests. Otherwise it runs in a background thread in the API process.
+
+### Workspace Isolation Boundary
+
+Workspaces now maintain their own source links and member signal snapshots:
+
+- `analysis_workspace_companies` stores workspace-local membership status, discovery rank, feature snapshots, tool
+  snapshots, source counts, and hydration timestamps.
+- `analysis_workspace_sources` links source rows to the workspace that uses them.
+- `GET /competitive-urls?analysis_workspace_id=:id` returns only sources linked to that workspace.
+- Workspace comparison uses the workspace member snapshots first, then falls back to global company aggregates only for
+  legacy/manual workspaces without linked sources.
+
+The global `company_profiles` table is still retained as a canonical identity layer. A future deeper migration can move
+news, claims, and canonical company duplicates into fully workspace-owned tables if hard multi-tenant physical isolation
+is required.
+
+### Dynamic Anchor Retargeting
+
+Use `POST /api/v1/workspace/re-target` to update the legacy/default focus anchor for an existing workspace. New UI flows
+should usually prefer `focus_anchor_company_id` on read APIs because it swaps the lens without mutating the workspace.
+The endpoint accepts `workspace_id` plus either `new_target_company_id` or `domain`.
+
+Retargeting performs these steps:
+
+1. Resolves or creates the new target company profile.
+2. Marks the workspace as `recalculating_landscape` with the message `Recalculating Landscape...`.
+3. Keeps the new target inside the workspace peer pool.
+4. Refreshes and recomputes the target baseline.
+5. Recomputes non-target peer profiles and rebuilds the gap matrix from the new baseline.
+6. Marks the workspace `ready` and records the `retarget_job_id`, `target_version`, and `recalculated_at`.
+
+Example:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/v1/workspace/re-target" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": 3,
+    "new_target_company_id": 12,
+    "company_ids": [7, 8, 12]
+  }'
+```
+
+In the example above, company `12` becomes the default focus anchor, remains in `company_ids`, and is excluded only from
+comparison rows while it is selected as the focus.
 
 ## Feature And Tool Extraction
 
@@ -79,7 +185,27 @@ Connectors use source-scoped Google News RSS queries of the form:
 
 Each connector is then filtered by company/domain identity and connector/source/topic relevance.
 
-Current connector catalog:
+`GET /enrichment-connectors` and the MCP `competitive_list_enrichment_connectors` tool now return:
+
+- `target_url`: the exact public source or API/docs entry point.
+- `strategic_value`: the feature, gap, compliance, marketplace, or community signal the connector is meant to uncover.
+- `method`: `source_scoped_google_news` for connectors that can safely run through the existing relevance gate today, or
+  `public_api_reference` / `community_api_reference` for opt-in adapters that need API-specific handling or credentials.
+- `requires_api_key` and `enabled_by_default`: used to keep expensive, noisy, or permissioned sources out of automatic
+  refreshes until explicitly configured.
+
+Expanded connector coverage:
+
+| Domain | Connector IDs | Default refresh behavior |
+| --- | --- | --- |
+| AI threat and vulnerability archives | `mitre_atlas`, `ai_incident_database`, `github_advisory_database_ai`, `huntr_ai_ml_vulnerabilities`, `garak_llm_vulnerability_scanner`, `github_prompt_injection_topic`, `github_jailbreak_topic` | Source-scoped public monitoring |
+| Research and academic pipelines | `arxiv_cs_cr_ai_security`, `arxiv_cs_lg_machine_learning`, `arxiv_cs_ai_artificial_intelligence`, `hugging_face_papers`, `usenix_security`, `ieee_security_privacy`, `acm_ccs`, `ndss_symposium`, `neurips_workshops_ai_security` | Source-scoped public monitoring |
+| Regulatory and compliance streams | `eu_ai_act_digital_strategy`, `eu_ai_office`, `iapp_ai_governance`, `ftc_ai_enforcement`, `uk_ico_ai_guidance`, `edpb_ai_privacy_guidance`, `nist_ai_rmf` | Source-scoped public monitoring |
+| Developer ecosystem and supply chain | `openssf_ai_supply_chain`, `pypi_security`, `npm_security_advisories`, `github_llmops_topic`, `github_langchain_topic`, `github_vector_database_topic`, `github_mcp_topic`, `langchain_blog`, `llamaindex_blog` | Source-scoped public monitoring |
+| Enterprise app marketplaces | `salesforce_appexchange`, `servicenow_store`, `sap_store`, `aws_marketplace`, `azure_marketplace`, `google_cloud_marketplace`, `microsoft_appsource`, `atlassian_marketplace`, `okta_integration_network`, `snowflake_marketplace`, `databricks_marketplace` | Source-scoped public monitoring |
+| High-signal tech communities | `hacker_news_algolia`, `reddit_machinelearning`, `reddit_localllama`, `reddit_cybersecurity`, `reddit_netsec`, `lobsters_ai_security`, `discord_ai_announcements` | Opt-in/API-reference by default, except low-volume public sources can be enabled later |
+
+Original seed connector catalog:
 
 | ID | Name | Category | Domain |
 | --- | --- | --- | --- |
@@ -203,17 +329,45 @@ Core endpoints:
 - `GET /companies/{id}/claims`
 - `POST /companies/{id}/refresh-news`
 - `POST /companies/{id}/refresh-enrichment`
+- `GET /analysis-workspaces`
+- `POST /analysis-workspaces`
+- `PUT /analysis-workspaces/{workspace_id}`
+- `DELETE /analysis-workspaces/{workspace_id}`
+- `POST /api/v1/workspace/re-target`
+- `POST /analysis-workspaces/{workspace_id}/re-target`
+- `GET /briefing`
+- `POST /ai/ask`
 - `GET /merge-reviews?status=pending`
 - `POST /merge-reviews/{id}/approve`
 - `POST /merge-reviews/{id}/reject`
 - `GET /ingestion-jobs`
 - `POST /ingestion-jobs/run-cycle`
 - `GET /comparison`
+- `GET /competitive-urls?analysis_workspace_id={workspace_id}`
+
+Scoped analysis examples:
+
+```bash
+# Compare all tracked competitors against a specific target company.
+curl "http://127.0.0.1:8000/comparison?baseline_company_id=12"
+
+# Compare only companies in a saved workspace.
+curl "http://127.0.0.1:8000/comparison?analysis_workspace_id=3&focus_anchor_company_id=12"
+
+# Generate the daily briefing for one workspace.
+curl "http://127.0.0.1:8000/briefing?analysis_workspace_id=3&focus_anchor_company_id=12"
+
+# Ask the analyst layer inside one workspace.
+curl -X POST "http://127.0.0.1:8000/ai/ask" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Which competitor has the largest gap?","analysis_workspace_id":3}'
+```
 
 ## Auto-Discovery
 
 `POST /competitors/auto-discover` uses the curated DSPM/data-security catalog and can optionally include news-driven
-discovery.
+discovery. Auto-discovered companies are added to the global company graph; add them to the relevant workspace before
+using them in a scoped briefing or comparison.
 
 Defaults:
 

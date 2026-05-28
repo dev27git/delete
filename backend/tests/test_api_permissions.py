@@ -97,6 +97,11 @@ def test_enrichment_connectors_are_listed(client) -> None:
     assert "google_security_blog" in connector_ids
     assert "snyk_ai_security" in connector_ids
     assert "venturebeat_ai" in connector_ids
+    assert "mitre_atlas" in connector_ids
+    assert "salesforce_appexchange" in connector_ids
+    mitre = next(item for item in response.json() if item["id"] == "mitre_atlas")
+    assert mitre["target_url"] == "https://atlas.mitre.org"
+    assert mitre["strategic_value"]
 
 
 def test_competitor_catalog_is_listed(client) -> None:

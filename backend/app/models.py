@@ -196,6 +196,96 @@ class CompanyProfile(Base):
     ingestion_jobs: Mapped[list[IngestionJob]] = relationship(back_populates="company", cascade="all, delete-orphan")
 
 
+class AnalysisWorkspace(Base):
+    __tablename__ = "analysis_workspaces"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False, unique=True, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    market_domain: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
+    target_company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("company_profiles.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="ready", index=True)
+    status_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    retarget_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ingestion_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    recalculated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+    target_company: Mapped[CompanyProfile | None] = relationship(foreign_keys=[target_company_id])
+    retarget_job: Mapped[IngestionJob | None] = relationship(foreign_keys=[retarget_job_id])
+    competitors: Mapped[list[AnalysisWorkspaceCompany]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+    source_links: Mapped[list[AnalysisWorkspaceSource]] = relationship(
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+    )
+
+
+class AnalysisWorkspaceCompany(Base):
+    __tablename__ = "analysis_workspace_companies"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "company_id", name="uq_analysis_workspace_company"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    workspace_id: Mapped[int] = mapped_column(
+        ForeignKey("analysis_workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("company_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="enriched_new", index=True)
+    discovery_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    market_position: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    feature_set_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tool_set_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    news_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_hydrated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    workspace: Mapped[AnalysisWorkspace] = relationship(back_populates="competitors")
+    company: Mapped[CompanyProfile] = relationship()
+
+
+class AnalysisWorkspaceSource(Base):
+    __tablename__ = "analysis_workspace_sources"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "source_id", name="uq_analysis_workspace_source"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    workspace_id: Mapped[int] = mapped_column(
+        ForeignKey("analysis_workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_id: Mapped[int] = mapped_column(
+        ForeignKey("company_sources.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    workspace: Mapped[AnalysisWorkspace] = relationship(back_populates="source_links")
+    source: Mapped[CompanySource] = relationship()
+
+
 class CompanySource(Base):
     __tablename__ = "company_sources"
 

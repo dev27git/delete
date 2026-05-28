@@ -75,6 +75,12 @@ const MAX_SOURCE_ROWS = 140;
 const MAX_COMPANY_CARDS = 120;
 const MAX_EVIDENCE_SOURCES = 80;
 const MAX_COMPARISON_ROWS = 80;
+const AUTONOMOUS_WORKSPACE_STATUSES = new Set([
+  "discovering_market",
+  "hydrating_entities",
+  "extracting_signals",
+  "calculating_gaps",
+]);
 
 function formatDate(value) {
   if (!value) return "-";
@@ -204,6 +210,7 @@ function marketSignalBasis(sourceKey, connectorsById = {}) {
     const connectorId = sourceKey.replace("enrichment:", "");
     const connector = connectorsById[connectorId];
     if (!connector) return "Connector-scoped source enrichment signal.";
+    if (connector.strategic_value) return connector.strategic_value;
     return `Connector-scoped signal from ${connector.name} (${connector.site_domain}) for targeted market context.`;
   }
   return "External signal channel used for company market intelligence.";
@@ -451,13 +458,14 @@ function QuickStartWizard({
   onSubmit,
   pending,
   competitorCount,
+  baselineName,
 }) {
   return (
     <section className="surface quickstart-panel">
       <div className="panel-title-row">
         <div>
           <span className="section-kicker">Quick start</span>
-          <h2>Which 3 competitors should Concentric monitor?</h2>
+          <h2>Which 3 competitors should we monitor against {baselineName}?</h2>
           <p>Add direct company, product, docs, or news URLs. The system will extract entities and generate the first briefing.</p>
         </div>
         <Target size={18} />
@@ -527,6 +535,7 @@ function AskConcentricPanel({
   question,
   answer,
   pending,
+  baselineName,
   onQuestionChange,
   onAsk,
   onUseSuggestion,
@@ -536,7 +545,7 @@ function AskConcentricPanel({
       <div className="panel-title-row">
         <div>
           <span className="section-kicker">Analyst layer</span>
-          <h2>Ask Concentric AI</h2>
+          <h2>Ask Competitive AI about {baselineName}</h2>
         </div>
         <Bot size={18} />
       </div>
@@ -578,6 +587,258 @@ function AskConcentricPanel({
           ) : null}
         </div>
       ) : null}
+    </section>
+  );
+}
+
+function AnalysisScopePanel({
+  companies,
+  workspaces,
+  selectedWorkspaceId,
+  selectedTargetId,
+  focusAnchorId,
+  draft,
+  editorOpen,
+  pending,
+  onWorkspaceChange,
+  onTargetChange,
+  onFocusAnchorChange,
+  onOpenNew,
+  onOpenEdit,
+  onCloseEditor,
+  onDraftChange,
+  onToggleCompany,
+  onSave,
+  onDelete,
+}) {
+  const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId) || null;
+  const selectedTarget = companies.find((company) => company.id === selectedTargetId) || null;
+  const workspaceCompanyIds = selectedWorkspace
+    ? selectedWorkspace.company_ids || selectedWorkspace.competitor_company_ids || []
+    : [];
+  const workspaceCompanyIdSet = new Set(workspaceCompanyIds);
+  const focusAnchorOptions = selectedWorkspace
+    ? companies.filter((company) => workspaceCompanyIdSet.has(company.id))
+    : companies;
+  const selectedFocusAnchor = companies.find((company) => company.id === focusAnchorId) || null;
+  const activeTargetName = selectedWorkspace
+    ? selectedFocusAnchor?.company_name || selectedWorkspace.default_focus_company_name || selectedWorkspace.target_company_name
+    : selectedTarget?.company_name || "Default target";
+  const companyCount = selectedWorkspace
+    ? selectedWorkspace.company_count ?? workspaceCompanyIds.length
+    : Math.max(0, companies.length - (selectedTargetId ? 1 : 0));
+  const draftCompanyIds = new Set(draft.companyIds || []);
+  const isCreateDraft = !draft.id;
+  const isRecalculating = selectedWorkspace?.status === "recalculating_landscape" || pending.scopeSave;
+  const scopeBusy = isRecalculating || pending.scopeDelete;
+
+  return (
+    <section className="analysis-scope-panel">
+      <div className="analysis-scope-summary">
+        <span className="section-kicker">Analysis scope</span>
+        <strong>{selectedWorkspace ? selectedWorkspace.name : `Ad hoc analysis for ${activeTargetName}`}</strong>
+        <p>
+          {selectedWorkspace
+            ? `${companyCount} tracked companies. Gap views use ${activeTargetName} as the current focus anchor.`
+            : "Use ad hoc mode for broad comparisons, or create a workspace to isolate unrelated markets."}
+        </p>
+        {isRecalculating ? (
+          <div className="analysis-scope-status">
+            <Loader2 size={13} className="spin" />
+            Recalculating Landscape...
+          </div>
+        ) : selectedWorkspace?.status === "recalculation_failed" ? (
+          <div className="analysis-scope-status failed">
+            <AlertTriangle size={13} />
+            {selectedWorkspace.status_message || "Retarget recalculation failed."}
+          </div>
+        ) : null}
+      </div>
+      <div className="analysis-scope-controls">
+        <select
+          value={selectedWorkspaceId || ""}
+          onChange={(event) => onWorkspaceChange(Number(event.target.value) || null)}
+          aria-label="Analysis workspace selector"
+          disabled={scopeBusy}
+        >
+          <option value="">Ad hoc scope</option>
+          {workspaces.map((workspace) => (
+            <option key={workspace.id} value={workspace.id}>
+              {workspace.name}
+            </option>
+          ))}
+        </select>
+        {!selectedWorkspace ? (
+          <select
+            value={selectedTargetId || ""}
+            onChange={(event) => onTargetChange(Number(event.target.value) || null)}
+            aria-label="Ad hoc analysis target selector"
+            disabled={scopeBusy}
+          >
+            <option value="">Default target</option>
+            {companies.map((company) => (
+              <option key={company.id} value={company.id}>
+                {company.company_name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <select
+            value={focusAnchorId || ""}
+            onChange={(event) => onFocusAnchorChange(Number(event.target.value) || null)}
+            aria-label="Focus anchor selector"
+            disabled={scopeBusy || focusAnchorOptions.length === 0}
+          >
+            <option value="">Focus anchor</option>
+            {focusAnchorOptions.map((company) => (
+              <option key={company.id} value={company.id}>
+                {company.company_name}
+              </option>
+            ))}
+          </select>
+        )}
+        <button type="button" className="icon-button compact" onClick={onOpenNew} disabled={scopeBusy}>
+          <Plus size={14} />
+          New Workspace
+        </button>
+        {selectedWorkspace ? (
+          <>
+            <button type="button" className="icon-button compact" onClick={onOpenEdit} disabled={scopeBusy}>
+              <Wrench size={14} />
+              Edit Workspace
+            </button>
+            <button
+              type="button"
+              className="icon-button danger"
+              onClick={onDelete}
+              disabled={pending.scopeDelete}
+              aria-label="Delete analysis scope"
+              title="Delete analysis scope"
+            >
+              {pending.scopeDelete ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+            </button>
+          </>
+        ) : null}
+      </div>
+
+      {editorOpen ? (
+        <div className="analysis-scope-editor">
+          <div className="analysis-scope-editor-grid">
+            <label>
+              <span>Workspace name</span>
+              <input
+                value={draft.name}
+                onChange={(event) => onDraftChange({ name: event.target.value })}
+                placeholder="DSPM market, CRM market, Observability market"
+                disabled={scopeBusy}
+              />
+            </label>
+            <label>
+              <span>Market domain</span>
+              <input
+                value={draft.marketDomain || ""}
+                onChange={(event) => onDraftChange({ marketDomain: event.target.value })}
+                placeholder="DSPM, CRM, Observability, Data Governance"
+                disabled={scopeBusy}
+              />
+            </label>
+            <label className="analysis-scope-full-field">
+              <span>Description</span>
+              <input
+                value={draft.description || ""}
+                onChange={(event) => onDraftChange({ description: event.target.value })}
+                placeholder="What market, segment, or buyer motion does this workspace track?"
+                disabled={scopeBusy}
+              />
+            </label>
+          </div>
+          {!isCreateDraft ? (
+            <div className="analysis-competitor-picker">
+              <div>
+                <strong>Tracked companies</strong>
+                <span>{draftCompanyIds.size} selected. Each company is an equal peer in this market bucket.</span>
+              </div>
+              <div className="analysis-competitor-grid">
+                {companies.length ? (
+                  companies.map((company) => {
+                    const isSelected = draftCompanyIds.has(company.id);
+                    return (
+                      <button
+                        key={company.id}
+                        type="button"
+                        className={`analysis-competitor-option ${isSelected ? "selected" : ""}`}
+                        onClick={() => onToggleCompany(company.id)}
+                        aria-pressed={isSelected}
+                        disabled={scopeBusy}
+                      >
+                        <span className={`analysis-competitor-check ${isSelected ? "selected" : ""}`}>
+                          {isSelected ? <Check size={13} /> : <Plus size={12} />}
+                        </span>
+                        <span>{company.company_name}</span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="analysis-competitor-empty">
+                    Add company sources first, then return here to choose tracked companies for this workspace.
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+          <div className="analysis-scope-editor-actions">
+            <button type="button" className="icon-button ghost text" onClick={onCloseEditor} disabled={scopeBusy}>
+              Cancel
+            </button>
+            <button type="button" onClick={onSave} disabled={scopeBusy}>
+              {pending.scopeSave ? <Loader2 size={14} className="spin" /> : <Check size={14} />}
+              Save Workspace
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function AutonomousWorkspaceCanvas({ workspace }) {
+  const status = workspace?.status || "discovering_market";
+  const steps = [
+    { id: "discovering_market", label: "Scoping market", description: workspace?.market_domain || "Market domain" },
+    { id: "hydrating_entities", label: "Discovering vendors", description: "Resolving company entities and domains" },
+    { id: "extracting_signals", label: "Hydrating evidence", description: "Scraping sources and extracting features" },
+    { id: "calculating_gaps", label: "Selecting anchor", description: "Preparing the initial gap matrix" },
+  ];
+  const activeIndex = Math.max(0, steps.findIndex((step) => step.id === status));
+
+  return (
+    <section className="surface autonomous-workspace-canvas">
+      <div className="autonomous-orbit" aria-hidden="true">
+        <Sparkles size={24} />
+      </div>
+      <div>
+        <span className="section-kicker">Autonomous workspace</span>
+        <h2>Autonomous Analyst Spinning Up...</h2>
+        <p>
+          {workspace?.status_message ||
+            `Building an isolated ${workspace?.market_domain || "market"} landscape from scratch.`}
+        </p>
+      </div>
+      <div className="autonomous-step-grid">
+        {steps.map((step, index) => {
+          const complete = index < activeIndex;
+          const active = index === activeIndex;
+          return (
+            <div key={step.id} className={`autonomous-step ${complete ? "complete" : ""} ${active ? "active" : ""}`}>
+              <span>{complete ? <Check size={13} /> : active ? <Loader2 size={13} className="spin" /> : index + 1}</span>
+              <div>
+                <strong>{step.label}</strong>
+                <small>{step.description}</small>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -630,7 +891,7 @@ function TutorialPage({ onNavigate }) {
           <ul>
             <li>Auto-resolves company entities from pasted URLs.</li>
             <li>Extracts feature and tool signals from product, docs, blog, and news sources.</li>
-            <li>Highlights market updates and competitor gaps against Concentric AI.</li>
+            <li>Highlights market updates and competitor gaps against whichever company you choose as the analysis target.</li>
           </ul>
           <div className="tutorial-callout">
             <strong>Outcome</strong>
@@ -708,7 +969,7 @@ function TutorialPage({ onNavigate }) {
             <div>
               <h3>Reveal the edge in the gap view</h3>
               <p>
-                Open <strong>Gaps</strong> to compare competitor capabilities against Concentric AI. This is where raw
+                Open <strong>Gaps</strong> to compare competitor capabilities against your selected analysis target. This is where raw
                 evidence becomes roadmap and battlecard direction.
               </p>
               <ul>
@@ -717,7 +978,7 @@ function TutorialPage({ onNavigate }) {
                   evidence.
                 </li>
                 <li>
-                  <strong>Features Concentric Lacks</strong> highlights capabilities such as Insider Risk Detection,
+                  <strong>Features Target Lacks</strong> highlights capabilities such as Insider Risk Detection,
                   Policy Automation, Compliance Reporting, or Data Governance.
                 </li>
                 <li>
@@ -732,7 +993,7 @@ function TutorialPage({ onNavigate }) {
                 </span>
               </div>
             </div>
-            <TutorialScreenshot label="Concentric Gap View UI: competitor matrix, gap score, feature gaps, market signals" />
+            <TutorialScreenshot label="Gap View UI: competitor matrix, gap score, feature gaps, market signals" />
           </div>
         </article>
       </section>
@@ -767,9 +1028,23 @@ function App() {
   const [briefing, setBriefing] = useState(null);
   const [selectedCompanyId, setSelectedCompanyId] = useState(null);
   const [selectedCompany, setSelectedCompany] = useState(null);
+  const [analysisTargetId, setAnalysisTargetId] = useState(null);
+  const [analysisWorkspaces, setAnalysisWorkspaces] = useState([]);
+  const [analysisWorkspacesLoaded, setAnalysisWorkspacesLoaded] = useState(false);
+  const [analysisWorkspaceId, setAnalysisWorkspaceId] = useState(null);
+  const [focusAnchorId, setFocusAnchorId] = useState(null);
+  const [scopeEditorOpen, setScopeEditorOpen] = useState(false);
+  const [scopeDraft, setScopeDraft] = useState({
+    id: null,
+    name: "",
+    description: "",
+    marketDomain: "",
+    companyIds: [],
+  });
   const [themeMode, setThemeMode] = useState("dark");
   const [companyQuery, setCompanyQuery] = useState("");
   const [sourceQuery, setSourceQuery] = useState("");
+  const [sourceIntakeNotice, setSourceIntakeNotice] = useState("");
   const [askQuestion, setAskQuestion] = useState("");
   const [askAnswer, setAskAnswer] = useState(null);
   const [quickStartRows, setQuickStartRows] = useState([
@@ -793,6 +1068,8 @@ function App() {
     runCycle: false,
     quickStart: false,
     ask: false,
+    scopeSave: false,
+    scopeDelete: false,
   });
 
   const resolveSelectedCompanyId = (currentId, nextCompanies) => {
@@ -809,17 +1086,20 @@ function App() {
     }
     setError("");
     try {
-      const [nextSources, nextCompanies, nextConnectors, nextDecisionPolicy] = await Promise.all([
-        api.listSources(),
+      const [nextSources, nextCompanies, nextConnectors, nextDecisionPolicy, nextWorkspaces] = await Promise.all([
+        api.listSources({ analysisWorkspaceId }),
         api.listCompanies(),
         api.listEnrichmentConnectors(),
         api.getDecisionPolicy(),
+        api.listAnalysisWorkspaces(),
       ]);
       const nextSelectedCompanyId = resolveSelectedCompanyId(selectedCompanyId, nextCompanies);
       setSources(nextSources);
       setCompanies(nextCompanies);
       setConnectors(nextConnectors);
       setDecisionPolicy(nextDecisionPolicy);
+      setAnalysisWorkspaces(nextWorkspaces);
+      setAnalysisWorkspacesLoaded(true);
       setSelectedCompanyId(nextSelectedCompanyId);
       return { selectedCompanyId: nextSelectedCompanyId };
     } catch (err) {
@@ -832,13 +1112,24 @@ function App() {
     }
   };
 
+  const loadAnalysisWorkspaces = async () => {
+    const nextWorkspaces = await api.listAnalysisWorkspaces();
+    setAnalysisWorkspaces(nextWorkspaces);
+    setAnalysisWorkspacesLoaded(true);
+    return nextWorkspaces;
+  };
+
   const loadBriefing = async ({ showLoading = true } = {}) => {
     if (showLoading) {
       setLoading(true);
     }
     setError("");
     try {
-      const nextBriefing = await api.getBriefing();
+      const nextBriefing = await api.getBriefing({
+        analysisWorkspaceId,
+        baselineCompanyId: analysisWorkspaceId ? null : analysisTargetId,
+        focusAnchorCompanyId: analysisWorkspaceId ? focusAnchorId : null,
+      });
       setBriefing(nextBriefing);
       return nextBriefing;
     } catch (err) {
@@ -857,7 +1148,11 @@ function App() {
     }
     setError("");
     try {
-      const nextComparison = await api.getComparison();
+      const nextComparison = await api.getComparison({
+        analysisWorkspaceId,
+        baselineCompanyId: analysisWorkspaceId ? null : analysisTargetId,
+        focusAnchorCompanyId: analysisWorkspaceId ? focusAnchorId : null,
+      });
       setComparison(nextComparison);
       return nextComparison;
     } catch (err) {
@@ -953,6 +1248,63 @@ function App() {
   };
 
   useEffect(() => {
+    const storedTargetId = Number(window.localStorage.getItem("cci-analysis-target-id") || "");
+    if (Number.isFinite(storedTargetId) && storedTargetId > 0) {
+      setAnalysisTargetId(storedTargetId);
+    }
+    const storedWorkspaceId = Number(window.localStorage.getItem("cci-analysis-workspace-id") || "");
+    if (Number.isFinite(storedWorkspaceId) && storedWorkspaceId > 0) {
+      setAnalysisWorkspaceId(storedWorkspaceId);
+    }
+    const storedFocusAnchorId = Number(window.localStorage.getItem("cci-focus-anchor-id") || "");
+    if (Number.isFinite(storedFocusAnchorId) && storedFocusAnchorId > 0) {
+      setFocusAnchorId(storedFocusAnchorId);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (analysisWorkspaceId) {
+      window.localStorage.setItem("cci-analysis-workspace-id", String(analysisWorkspaceId));
+      return;
+    }
+    window.localStorage.removeItem("cci-analysis-workspace-id");
+  }, [analysisWorkspaceId]);
+
+  useEffect(() => {
+    if (analysisWorkspaceId && focusAnchorId) {
+      window.localStorage.setItem("cci-focus-anchor-id", String(focusAnchorId));
+      return;
+    }
+    window.localStorage.removeItem("cci-focus-anchor-id");
+  }, [analysisWorkspaceId, focusAnchorId]);
+
+  useEffect(() => {
+    if (analysisWorkspaceId) {
+      window.localStorage.removeItem("cci-analysis-target-id");
+      return;
+    }
+    if (analysisTargetId) {
+      window.localStorage.setItem("cci-analysis-target-id", String(analysisTargetId));
+      return;
+    }
+    window.localStorage.removeItem("cci-analysis-target-id");
+  }, [analysisTargetId, analysisWorkspaceId]);
+
+  useEffect(() => {
+    if (!analysisWorkspacesLoaded || !analysisWorkspaceId) return;
+    if (!analysisWorkspaces.some((workspace) => workspace.id === analysisWorkspaceId)) {
+      setAnalysisWorkspaceId(null);
+    }
+  }, [analysisWorkspacesLoaded, analysisWorkspaces, analysisWorkspaceId]);
+
+  useEffect(() => {
+    if (analysisWorkspaceId || !analysisTargetId || companies.length === 0) return;
+    if (!companies.some((company) => company.id === analysisTargetId)) {
+      setAnalysisTargetId(null);
+    }
+  }, [analysisWorkspaceId, analysisTargetId, companies]);
+
+  useEffect(() => {
     const stored = window.localStorage.getItem("cci-theme");
     if (THEME_OPTIONS.some((theme) => theme.id === stored)) {
       setThemeMode(stored);
@@ -997,6 +1349,19 @@ function App() {
     }
   }, [activeView, briefing, comparison, opsLoaded]);
 
+  useEffect(() => {
+    setBriefing(null);
+    setComparison(null);
+    setAskAnswer(null);
+    loadOverview({ showLoading: false });
+    if (activeView === "briefing" || activeView === "signals") {
+      loadBriefing({ showLoading: false });
+    }
+    if (activeView === "comparison") {
+      loadComparison({ showLoading: false });
+    }
+  }, [analysisTargetId, analysisWorkspaceId, focusAnchorId]);
+
   const totals = useMemo(() => {
     const featureTotal = companies.reduce((sum, company) => sum + company.features.length, 0);
     const toolTotal = companies.reduce((sum, company) => sum + company.tools.length, 0);
@@ -1028,18 +1393,31 @@ function App() {
     () => Object.fromEntries(connectors.map((connector) => [connector.id, connector])),
     [connectors],
   );
+  const selectedAnalysisWorkspace = useMemo(
+    () => analysisWorkspaces.find((workspace) => workspace.id === analysisWorkspaceId) || null,
+    [analysisWorkspaces, analysisWorkspaceId],
+  );
+  const selectedWorkspaceCompanyIds = useMemo(
+    () => selectedAnalysisWorkspace?.company_ids || selectedAnalysisWorkspace?.competitor_company_ids || [],
+    [selectedAnalysisWorkspace],
+  );
+  const workspaceScopedCompanies = useMemo(() => {
+    if (!selectedAnalysisWorkspace) return companies;
+    const scopedIds = new Set(selectedWorkspaceCompanyIds);
+    return companies.filter((company) => scopedIds.has(company.id));
+  }, [companies, selectedAnalysisWorkspace, selectedWorkspaceCompanyIds]);
 
   const filteredCompanies = useMemo(() => {
     const query = companyQuery.trim().toLowerCase();
     if (!query) {
-      return companies;
+      return workspaceScopedCompanies;
     }
-    return companies.filter((company) => {
+    return workspaceScopedCompanies.filter((company) => {
       const companyName = (company.company_name || "").toLowerCase();
       const domain = (company.primary_domain || "").toLowerCase();
       return companyName.includes(query) || domain.includes(query);
     });
-  }, [companies, companyQuery]);
+  }, [workspaceScopedCompanies, companyQuery]);
 
   const filteredSources = useMemo(() => {
     const query = sourceQuery.trim().toLowerCase();
@@ -1141,15 +1519,208 @@ function App() {
     [themeMode],
   );
   const SelectedThemeIcon = selectedTheme.icon;
+  const selectedAnalysisTarget = useMemo(
+    () => companies.find((company) => company.id === analysisTargetId) || null,
+    [companies, analysisTargetId],
+  );
+  const selectedFocusAnchor = useMemo(
+    () => companies.find((company) => company.id === focusAnchorId) || null,
+    [companies, focusAnchorId],
+  );
+
+  useEffect(() => {
+    if (!selectedAnalysisWorkspace) {
+      if (focusAnchorId) {
+        setFocusAnchorId(null);
+      }
+      return;
+    }
+    if (selectedWorkspaceCompanyIds.length === 0) {
+      if (focusAnchorId) {
+        setFocusAnchorId(null);
+      }
+      return;
+    }
+    if (focusAnchorId && selectedWorkspaceCompanyIds.includes(focusAnchorId)) {
+      return;
+    }
+    const defaultFocusId =
+      selectedAnalysisWorkspace.default_focus_company_id ||
+      selectedAnalysisWorkspace.target_company_id ||
+      selectedWorkspaceCompanyIds[0];
+    setFocusAnchorId(selectedWorkspaceCompanyIds.includes(defaultFocusId) ? defaultFocusId : selectedWorkspaceCompanyIds[0]);
+  }, [selectedAnalysisWorkspace, selectedWorkspaceCompanyIds, focusAnchorId]);
+
+  const activeBaselineName =
+    briefing?.baseline_company_name ||
+    comparison?.baseline_company_name ||
+    selectedFocusAnchor?.company_name ||
+    selectedAnalysisWorkspace?.default_focus_company_name ||
+    selectedAnalysisWorkspace?.target_company_name ||
+    selectedAnalysisTarget?.company_name ||
+    "the selected company";
   const briefingInsights = briefing?.top_insights || [];
   const urgentSignals = briefing?.urgent_signals || [];
+  const competitorCountForTarget =
+    briefing?.totals?.companies ??
+    (selectedAnalysisWorkspace
+      ? Math.max(0, selectedWorkspaceCompanyIds.length - (focusAnchorId ? 1 : 0))
+      : Math.max(0, companies.length - (analysisTargetId || briefing?.baseline_company_id ? 1 : 0)));
   const shouldShowQuickStart =
-    (briefing?.totals?.companies || companies.filter((company) => company.company_name !== "Concentric AI").length) < 3;
+    competitorCountForTarget < 3;
+  const isAutonomousWorkspaceBootstrapping =
+    selectedAnalysisWorkspace && AUTONOMOUS_WORKSPACE_STATUSES.has(selectedAnalysisWorkspace.status);
+
+  useEffect(() => {
+    if (!isAutonomousWorkspaceBootstrapping || !analysisWorkspaceId) return undefined;
+    const intervalId = window.setInterval(async () => {
+      const nextWorkspaces = await loadAnalysisWorkspaces().catch(() => null);
+      const nextWorkspace = nextWorkspaces?.find((workspace) => workspace.id === analysisWorkspaceId);
+      if (nextWorkspace?.status === "ready") {
+        await loadOverview({ showLoading: false });
+        setBriefing(null);
+        setComparison(null);
+        if (activeView === "briefing" || activeView === "signals") {
+          await loadBriefing({ showLoading: false });
+        }
+        if (activeView === "comparison") {
+          await loadComparison({ showLoading: false });
+        }
+      }
+    }, 2500);
+    return () => window.clearInterval(intervalId);
+  }, [isAutonomousWorkspaceBootstrapping, analysisWorkspaceId, activeView]);
 
   const openCompanyFromInsight = async (companyId) => {
     setSelectedCompanyId(companyId);
     setActiveView("companies");
     await loadCompanyDetail(companyId, { showLoading: true });
+  };
+
+  const openNewScope = () => {
+    const initialCompanyIds = analysisTargetId ? [analysisTargetId] : [];
+    setScopeDraft({
+      id: null,
+      name: "",
+      description: "",
+      marketDomain: "",
+      companyIds: initialCompanyIds,
+    });
+    setScopeEditorOpen(true);
+  };
+
+  const openEditScope = () => {
+    if (!selectedAnalysisWorkspace) return;
+    setScopeDraft({
+      id: selectedAnalysisWorkspace.id,
+      name: selectedAnalysisWorkspace.name,
+      description: selectedAnalysisWorkspace.description || "",
+      marketDomain: selectedAnalysisWorkspace.market_domain || "",
+      companyIds: selectedAnalysisWorkspace.company_ids || selectedAnalysisWorkspace.competitor_company_ids || [],
+    });
+    setScopeEditorOpen(true);
+  };
+
+  const updateScopeDraft = (patch) => {
+    setScopeDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const toggleScopeCompany = (companyId) => {
+    setScopeDraft((current) => {
+      const companyIds = new Set(current.companyIds || []);
+      if (companyIds.has(companyId)) {
+        companyIds.delete(companyId);
+      } else {
+        companyIds.add(companyId);
+      }
+      return { ...current, companyIds: [...companyIds] };
+    });
+  };
+
+  const saveAnalysisScope = async () => {
+    const name = scopeDraft.name.trim();
+    const marketDomain = (scopeDraft.marketDomain || "").trim();
+    const companyIds = [...new Set((scopeDraft.companyIds || []).map(Number))].filter((companyId) => companyId > 0);
+    if (!name || (!scopeDraft.id && !marketDomain)) {
+      setError("Choose a workspace name and market domain before saving.");
+      return;
+    }
+    if (scopeDraft.id && companyIds.length === 0) {
+      setError("Choose at least one tracked company before saving this workspace.");
+      return;
+    }
+    setError("");
+    setPending((prev) => ({ ...prev, scopeSave: true }));
+    try {
+      const payload = {
+        name,
+        description: (scopeDraft.description || "").trim() || null,
+        market_domain: marketDomain || null,
+      };
+      if (scopeDraft.id) {
+        payload.company_ids = companyIds;
+      }
+      const savedWorkspace = scopeDraft.id
+        ? await api.updateAnalysisWorkspace(scopeDraft.id, payload)
+        : await api.createAnalysisWorkspace(payload);
+      const nextWorkspaces = await loadAnalysisWorkspaces();
+      const nextWorkspace = nextWorkspaces.find((workspace) => workspace.id === savedWorkspace.id) || savedWorkspace;
+      const nextCompanyIds = nextWorkspace.company_ids || nextWorkspace.competitor_company_ids || [];
+      const nextFocusAnchorId = nextCompanyIds.includes(focusAnchorId)
+        ? focusAnchorId
+        : nextCompanyIds.includes(analysisTargetId)
+          ? analysisTargetId
+          : nextWorkspace.default_focus_company_id || nextCompanyIds[0] || null;
+      setAnalysisWorkspaceId(nextWorkspace.id);
+      setFocusAnchorId(nextFocusAnchorId);
+      setAnalysisTargetId(null);
+      setActiveView("briefing");
+      setScopeEditorOpen(false);
+      setScopeDraft({ id: null, name: "", description: "", marketDomain: "", companyIds: [] });
+      setBriefing(null);
+      setComparison(null);
+      setAskAnswer(null);
+    } catch (err) {
+      setError(err.message || "Failed to save analysis scope.");
+    } finally {
+      setPending((prev) => ({ ...prev, scopeSave: false }));
+    }
+  };
+
+  const deleteAnalysisScope = async () => {
+    if (!selectedAnalysisWorkspace) return;
+    if (!window.confirm(`Delete analysis scope "${selectedAnalysisWorkspace.name}"?`)) return;
+    setError("");
+    setPending((prev) => ({ ...prev, scopeDelete: true }));
+    try {
+      await api.deleteAnalysisWorkspace(selectedAnalysisWorkspace.id);
+      setAnalysisWorkspaceId(null);
+      setFocusAnchorId(null);
+      setScopeEditorOpen(false);
+      setScopeDraft({ id: null, name: "", description: "", marketDomain: "", companyIds: [] });
+      setBriefing(null);
+      setComparison(null);
+      setAskAnswer(null);
+      await loadAnalysisWorkspaces();
+    } catch (err) {
+      setError(err.message || "Failed to delete analysis scope.");
+    } finally {
+      setPending((prev) => ({ ...prev, scopeDelete: false }));
+    }
+  };
+
+  const attachAddedCompaniesToActiveScope = async (companyIds) => {
+    if (!selectedAnalysisWorkspace || companyIds.length === 0) return;
+    const nextCompanyIds = [
+      ...new Set([
+        ...(selectedAnalysisWorkspace.company_ids || selectedAnalysisWorkspace.competitor_company_ids || []),
+        ...companyIds,
+      ]),
+    ];
+    await api.updateAnalysisWorkspace(selectedAnalysisWorkspace.id, {
+      company_ids: nextCompanyIds,
+    });
+    await loadAnalysisWorkspaces();
   };
 
   const updateQuickStartRow = (index, field, value) => {
@@ -1171,9 +1742,25 @@ function App() {
     setError("");
     setPending((prev) => ({ ...prev, quickStart: true }));
     try {
+      const addedCompanyIds = [];
       for (const row of rowsToAdd) {
-        await api.addSource({ url: row.url });
+        const addedSource = await api.addSource({
+          url: row.url,
+          analysis_workspace_id: analysisWorkspaceId || null,
+        });
+        if (addedSource?.company_id) {
+          addedCompanyIds.push(addedSource.company_id);
+        }
       }
+      const focusMatches = selectedAnalysisWorkspace && focusAnchorId
+        ? addedCompanyIds.filter((companyId) => companyId === focusAnchorId).length
+        : 0;
+      await attachAddedCompaniesToActiveScope(addedCompanyIds);
+      setSourceIntakeNotice(
+        focusMatches > 0
+          ? `${focusMatches} source${focusMatches === 1 ? "" : "s"} matched the current focus anchor. It stays in the workspace pool and is excluded only while selected as the focus.`
+          : "",
+      );
       setQuickStartRows([
         { name: "", url: "" },
         { name: "", url: "" },
@@ -1195,10 +1782,15 @@ function App() {
     setError("");
     setPending((prev) => ({ ...prev, ask: true }));
     try {
-      const response = await api.askConcentric({ question: askQuestion.trim() });
+      const response = await api.askConcentric({
+        question: askQuestion.trim(),
+        analysis_workspace_id: analysisWorkspaceId,
+        baseline_company_id: analysisWorkspaceId ? null : analysisTargetId,
+        focus_anchor_company_id: analysisWorkspaceId ? focusAnchorId : null,
+      });
       setAskAnswer(response);
     } catch (err) {
-      setError(err.message || "Failed to ask Concentric AI.");
+      setError(err.message || "Failed to ask Competitive AI.");
     } finally {
       setPending((prev) => ({ ...prev, ask: false }));
     }
@@ -1207,9 +1799,23 @@ function App() {
   const addSource = async (event) => {
     event.preventDefault();
     setError("");
+    setSourceIntakeNotice("");
     setPending((prev) => ({ ...prev, adding: true }));
     try {
-      await api.addSource({ url: urlInput.trim() });
+      const addedSource = await api.addSource({
+        url: urlInput.trim(),
+        analysis_workspace_id: analysisWorkspaceId || null,
+      });
+      const matchedFocus =
+        selectedAnalysisWorkspace && focusAnchorId && addedSource?.company_id === focusAnchorId;
+      await attachAddedCompaniesToActiveScope(addedSource?.company_id ? [addedSource.company_id] : []);
+      if (matchedFocus) {
+        setSourceIntakeNotice(
+          `${addedSource.company_name || activeBaselineName} is the current focus anchor. It remains in the workspace pool and is excluded only from comparison rows while selected as focus.`,
+        );
+      } else if (selectedAnalysisWorkspace && addedSource?.company_id) {
+        setSourceIntakeNotice(`${addedSource.company_name || "Company"} was added to this workspace's tracked companies.`);
+      }
       setUrlInput("");
       setComparison(null);
       setOpsLoaded(false);
@@ -1227,8 +1833,9 @@ function App() {
     try {
       const result = await api.autoDiscoverCompetitors({
         maxCandidates: 60,
-        includeNews: true,
+        includeNews: false,
         refreshMarketSignals: false,
+        analysisWorkspaceId: analysisWorkspaceId || null,
       });
       setAutoDiscoverResult(result);
       setComparison(null);
@@ -1351,8 +1958,8 @@ function App() {
     <div className="app-shell">
       <header className="header">
         <div>
-          <span className="hero-kicker">Concentric AI</span>
-          <h1>Concentric Competitive Intelligence Control Center</h1>
+          <span className="hero-kicker">Competitive Intelligence</span>
+          <h1>Competitive Intelligence Control Center</h1>
           <p>
             Start with today's strategic briefing, then drill into competitor evidence only when
             a signal needs validation.
@@ -1382,6 +1989,37 @@ function App() {
           </button>
         </div>
       </header>
+
+      <AnalysisScopePanel
+        companies={companies}
+        workspaces={analysisWorkspaces}
+        selectedWorkspaceId={analysisWorkspaceId}
+        selectedTargetId={analysisTargetId}
+        focusAnchorId={focusAnchorId}
+        draft={scopeDraft}
+        editorOpen={scopeEditorOpen}
+        pending={pending}
+        onWorkspaceChange={(workspaceId) => {
+          setAnalysisWorkspaceId(workspaceId);
+          if (workspaceId) {
+            setAnalysisTargetId(null);
+          }
+          setScopeEditorOpen(false);
+        }}
+        onTargetChange={(targetId) => {
+          setAnalysisTargetId(targetId);
+          setAnalysisWorkspaceId(null);
+          setFocusAnchorId(null);
+        }}
+        onFocusAnchorChange={setFocusAnchorId}
+        onOpenNew={openNewScope}
+        onOpenEdit={openEditScope}
+        onCloseEditor={() => setScopeEditorOpen(false)}
+        onDraftChange={updateScopeDraft}
+        onToggleCompany={toggleScopeCompany}
+        onSave={saveAnalysisScope}
+        onDelete={deleteAnalysisScope}
+      />
 
       <section className={`guide-launcher ${activeView === "guide" ? "active" : ""}`}>
         <div>
@@ -1423,6 +2061,9 @@ function App() {
 
       {activeView === "briefing" ? (
         <main className="briefing-workspace">
+          {isAutonomousWorkspaceBootstrapping ? (
+            <AutonomousWorkspaceCanvas workspace={selectedAnalysisWorkspace} />
+          ) : (
           <section className="surface priority-briefing">
             <div className="briefing-head">
               <div>
@@ -1442,7 +2083,7 @@ function App() {
                 <Sparkles size={18} />
                 <div>
                   <strong>Your first briefing is waiting for competitor evidence.</strong>
-                  <span>Add competitor URLs below. Concentric will turn the first scrape into prioritized signals.</span>
+                  <span>Add competitor URLs below. The analyst layer will turn the first scrape into prioritized signals.</span>
                 </div>
               </div>
             ) : (
@@ -1469,7 +2110,10 @@ function App() {
               </div>
             )}
           </section>
+          )}
 
+          {!isAutonomousWorkspaceBootstrapping ? (
+            <>
           <section className={`briefing-action-grid ${shouldShowQuickStart ? "" : "single"}`}>
             {shouldShowQuickStart ? (
               <QuickStartWizard
@@ -1478,6 +2122,7 @@ function App() {
                 onSubmit={submitQuickStart}
                 pending={pending.quickStart}
                 competitorCount={briefing?.totals?.companies || 0}
+                baselineName={activeBaselineName}
               />
             ) : null}
             <OnboardingChecklist steps={briefing?.onboarding || []} />
@@ -1488,6 +2133,7 @@ function App() {
             question={askQuestion}
             answer={askAnswer}
             pending={pending.ask}
+            baselineName={activeBaselineName}
             onQuestionChange={setAskQuestion}
             onAsk={askConcentric}
             onUseSuggestion={(suggestion) => {
@@ -1562,6 +2208,8 @@ function App() {
               </div>
             </section>
           ) : null}
+            </>
+          ) : null}
         </main>
       ) : null}
 
@@ -1612,6 +2260,23 @@ function App() {
               </button>
             </div>
           </form>
+
+          {selectedAnalysisWorkspace ? (
+            <div className="source-target-guard">
+              <Target size={15} />
+              <span>
+                Focus anchor: <strong>{activeBaselineName}</strong>. New sources are added to the workspace pool;
+                the focus anchor is excluded only from comparison rows while selected.
+              </span>
+            </div>
+          ) : null}
+
+          {sourceIntakeNotice ? (
+            <div className="source-intake-notice">
+              <CheckCircle2 size={15} />
+              <span>{sourceIntakeNotice}</span>
+            </div>
+          ) : null}
 
           {autoDiscoverResult ? (
             <div className="discovery-summary">
@@ -2218,8 +2883,8 @@ function App() {
                 <th>Competitor</th>
                 <th>Gap Score</th>
                 <th>Score Drivers</th>
-                <th>Features Concentric Lacks</th>
-                <th>Tools Concentric Lacks</th>
+                <th>Features {comparison.baseline_company_name} Lacks</th>
+                <th>Tools {comparison.baseline_company_name} Lacks</th>
                 <th>Latest Market Signals</th>
               </tr>
             </thead>

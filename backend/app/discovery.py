@@ -35,6 +35,21 @@ COMPETITOR_CATALOG: tuple[CompetitorCandidate, ...] = (
     CompetitorCandidate("Netskope", "https://www.netskope.com/", "Cloud Security", "catalog"),
     CompetitorCandidate("Tenable", "https://www.tenable.com/", "Exposure Management", "catalog"),
     CompetitorCandidate("Imperva", "https://www.imperva.com/", "Data Security", "catalog"),
+    CompetitorCandidate("Collibra", "https://www.collibra.com/", "Data Governance", "catalog"),
+    CompetitorCandidate("Informatica", "https://www.informatica.com/", "Data Governance", "catalog"),
+    CompetitorCandidate("Alation", "https://www.alation.com/", "Data Governance", "catalog"),
+    CompetitorCandidate("Atlan", "https://atlan.com/", "Data Governance", "catalog"),
+    CompetitorCandidate("OneTrust", "https://www.onetrust.com/", "Data Governance", "catalog"),
+    CompetitorCandidate("Talend", "https://www.talend.com/", "Data Governance", "catalog"),
+    CompetitorCandidate("Boomi", "https://boomi.com/", "Data Integration", "catalog"),
+    CompetitorCandidate("MuleSoft", "https://www.mulesoft.com/", "Integration Platform", "catalog"),
+    CompetitorCandidate("HubSpot", "https://www.hubspot.com/", "CRM", "catalog"),
+    CompetitorCandidate("Salesforce", "https://www.salesforce.com/", "CRM", "catalog"),
+    CompetitorCandidate("Microsoft Dynamics 365", "https://dynamics.microsoft.com/", "CRM", "catalog"),
+    CompetitorCandidate("ServiceNow", "https://www.servicenow.com/", "Workflow Automation", "catalog"),
+    CompetitorCandidate("Datadog", "https://www.datadoghq.com/", "Observability", "catalog"),
+    CompetitorCandidate("Dynatrace", "https://www.dynatrace.com/", "Observability", "catalog"),
+    CompetitorCandidate("New Relic", "https://newrelic.com/", "Observability", "catalog"),
 )
 
 DISCOVERY_NEWS_QUERIES: tuple[str, ...] = (
@@ -107,8 +122,69 @@ def discover_competitor_candidates(max_count: int = 40, include_news: bool = Fal
     return list(by_domain.values())[:max_count]
 
 
+def discover_market_landscape_candidates(
+    market_domain: str,
+    max_count: int = 7,
+    include_news: bool = False,
+) -> list[CompetitorCandidate]:
+    query = (market_domain or "").strip()
+    if not query:
+        return discover_competitor_candidates(max_count=max_count, include_news=include_news)
+
+    query_tokens = _significant_tokens(query)
+    scored: list[tuple[int, int, CompetitorCandidate]] = []
+    for index, candidate in enumerate(COMPETITOR_CATALOG):
+        haystack = f"{candidate.company_name} {candidate.segment} {candidate.url}".lower()
+        score = sum(3 if token in candidate.segment.lower() else 1 for token in query_tokens if token in haystack)
+        if candidate.segment.lower() == query.lower():
+            score += 10
+        if score > 0:
+            scored.append((score, -index, candidate))
+
+    scored.sort(reverse=True)
+    selected = [candidate for _, _, candidate in scored[:max_count]]
+
+    if include_news and len(selected) < max_count:
+        discovered = discover_competitor_candidates(max_count=max_count * 2, include_news=True)
+        known_domains = {extract_domain(normalize_url(candidate.url)).removeprefix("www.") for candidate in selected}
+        for candidate in discovered:
+            domain = extract_domain(normalize_url(candidate.url)).removeprefix("www.")
+            if domain in known_domains:
+                continue
+            selected.append(candidate)
+            known_domains.add(domain)
+            if len(selected) >= max_count:
+                break
+
+    if selected:
+        return selected[:max_count]
+
+    return discover_competitor_candidates(max_count=max_count, include_news=include_news)
+
+
 def _news_search_feed_url(query: str) -> str:
     return f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
+
+
+def _significant_tokens(value: str) -> set[str]:
+    stop_words = {
+        "a",
+        "an",
+        "and",
+        "for",
+        "in",
+        "of",
+        "platform",
+        "software",
+        "suite",
+        "the",
+        "to",
+    }
+    return {
+        token
+        for token in value.lower().replace("/", " ").replace("-", " ").split()
+        if len(token) > 2 and token not in stop_words
+    }
 
 
 def _skip_domain(domain: str) -> bool:

@@ -9,8 +9,27 @@ def test_connector_catalog_has_unique_ids() -> None:
     connectors = enrichment.list_enrichment_connectors()
     connector_ids = [connector.id for connector in connectors]
 
-    assert len(connectors) >= 20
+    assert len(connectors) >= 60
     assert len(connector_ids) == len(set(connector_ids))
+
+
+def test_connector_catalog_covers_expanded_intelligence_domains() -> None:
+    connectors = enrichment.list_enrichment_connectors()
+    connector_by_id = {connector.id: connector for connector in connectors}
+    categories = {connector.category for connector in connectors}
+
+    assert {
+        "AI Threat & Vulnerability Archive",
+        "Research & Academic Pipeline",
+        "Regulatory & Compliance Stream",
+        "Developer Ecosystem & Supply Chain",
+        "Enterprise App Marketplace",
+        "High-Signal Tech Community",
+    }.issubset(categories)
+    assert connector_by_id["mitre_atlas"].target_url == "https://atlas.mitre.org"
+    assert connector_by_id["ai_incident_database"].strategic_value
+    assert connector_by_id["salesforce_appexchange"].enabled_by_default is True
+    assert connector_by_id["discord_ai_announcements"].requires_api_key is True
 
 
 def test_connector_relevance_requires_company_identity() -> None:
@@ -103,3 +122,23 @@ def test_fetch_enrichment_news_filters_irrelevant_feed_items(monkeypatch) -> Non
     assert [item.title for item in results["techcrunch_ai"]] == [
         "Lakera launches new AI security product"
     ]
+
+
+def test_fetch_enrichment_news_skips_non_fetchable_connector_methods(monkeypatch) -> None:
+    connector = EnrichmentConnector(
+        id="hacker_news_algolia",
+        name="Hacker News Algolia",
+        category="High-Signal Tech Community",
+        method="public_api_reference",
+        site_domain="hn.algolia.com",
+        query_terms=("AI", "security"),
+        enabled_by_default=True,
+    )
+
+    def fake_fetch_news_feed(feed_url: str) -> list[NewsItem]:
+        raise AssertionError(f"unexpected fetch for {feed_url}")
+
+    monkeypatch.setattr(enrichment, "CONNECTORS", (connector,))
+    monkeypatch.setattr(enrichment, "fetch_news_feed", fake_fetch_news_feed)
+
+    assert enrichment.fetch_enrichment_news(company_name="Lakera", domain="lakera.ai") == {}

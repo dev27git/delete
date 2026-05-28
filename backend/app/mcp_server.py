@@ -302,6 +302,8 @@ def _call_list_enrichment_connectors(arguments: dict[str, Any]) -> dict[str, Any
                 "site_domain": connector.site_domain,
                 "requires_api_key": connector.requires_api_key,
                 "enabled_by_default": connector.enabled_by_default,
+                "target_url": connector.target_url,
+                "strategic_value": connector.strategic_value,
             }
             for connector in list_enrichment_connectors()
         ]

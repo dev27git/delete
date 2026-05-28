@@ -2,6 +2,98 @@ from app.discovery import CompetitorCandidate
 from app.scraper import FeatureHit, NewsItem, ScrapeResult, ToolHit
 
 
+def test_zero_input_workspace_autonomous_discovery(client, monkeypatch) -> None:
+    candidates = [
+        CompetitorCandidate("Collibra", "https://www.collibra.com/", "Data Governance", "catalog"),
+        CompetitorCandidate("Alation", "https://www.alation.com/", "Data Governance", "catalog"),
+        CompetitorCandidate("Atlan", "https://atlan.com/", "Data Governance", "catalog"),
+    ]
+
+    def fake_landscape(market_domain: str, max_count: int = 7, include_news: bool = False) -> list[CompetitorCandidate]:
+        assert market_domain == "Data Governance"
+        return candidates[:max_count]
+
+    scrape_by_url = {
+        "https://www.collibra.com/": ScrapeResult(
+            http_status=200,
+            final_url="https://www.collibra.com/",
+            source_type="website",
+            page_title="Collibra Data Intelligence",
+            meta_description="Data governance platform",
+            headings=["Data Governance", "Catalog"],
+            summary="Collibra data governance summary",
+            company_name="Collibra",
+            publisher="Collibra",
+            published_at=None,
+            detected_features=[FeatureHit(name="Data Catalog", category="Data Governance")],
+            detected_tools=[ToolHit(name="Snowflake", category="Data Platform")],
+            confidence=0.9,
+        ),
+        "https://www.alation.com/": ScrapeResult(
+            http_status=200,
+            final_url="https://www.alation.com/",
+            source_type="website",
+            page_title="Alation Data Catalog",
+            meta_description="Data intelligence and catalog",
+            headings=["Governance", "Lineage"],
+            summary="Alation data catalog summary",
+            company_name="Alation",
+            publisher="Alation",
+            published_at=None,
+            detected_features=[FeatureHit(name="Data Lineage", category="Data Governance")],
+            detected_tools=[ToolHit(name="Databricks", category="Data Platform")],
+            confidence=0.88,
+        ),
+        "https://atlan.com/": ScrapeResult(
+            http_status=200,
+            final_url="https://atlan.com/",
+            source_type="website",
+            page_title="Atlan Active Metadata",
+            meta_description="Active metadata platform",
+            headings=["Metadata", "Governance"],
+            summary="Atlan metadata summary",
+            company_name="Atlan",
+            publisher="Atlan",
+            published_at=None,
+            detected_features=[FeatureHit(name="Active Metadata", category="Data Governance")],
+            detected_tools=[ToolHit(name="Google Cloud", category="Cloud Infrastructure")],
+            confidence=0.86,
+        ),
+    }
+
+    monkeypatch.setattr("app.main.discover_market_landscape_candidates", fake_landscape)
+    monkeypatch.setattr("app.main.scrape_source_url", lambda url: scrape_by_url[url])
+
+    workspace = client.post(
+        "/analysis-workspaces",
+        json={
+            "name": "Data Governance Suite",
+            "market_domain": "Data Governance",
+            "description": "Hands-free workspace creation",
+        },
+    )
+    assert workspace.status_code == 201, workspace.text
+    workspace_payload = workspace.json()
+    assert workspace_payload["status"] == "ready"
+    assert workspace_payload["market_domain"] == "Data Governance"
+    assert workspace_payload["company_count"] == 3
+    assert workspace_payload["default_focus_company_id"] in workspace_payload["company_ids"]
+
+    sources = client.get(f"/competitive-urls?analysis_workspace_id={workspace_payload['id']}")
+    assert sources.status_code == 200
+    assert len(sources.json()) == 3
+
+    comparison = client.get(
+        f"/comparison?analysis_workspace_id={workspace_payload['id']}"
+        f"&focus_anchor_company_id={workspace_payload['default_focus_company_id']}"
+    )
+    assert comparison.status_code == 200
+    comparison_payload = comparison.json()
+    assert comparison_payload["analysis_workspace_id"] == workspace_payload["id"]
+    assert comparison_payload["baseline_company_id"] == workspace_payload["default_focus_company_id"]
+    assert len(comparison_payload["competitors"]) == 2
+
+
 def test_entity_merge_news_and_comparison(client, monkeypatch) -> None:
     scrape_responses = [
         ScrapeResult(
@@ -135,12 +227,63 @@ def test_entity_merge_news_and_comparison(client, monkeypatch) -> None:
     refresh_enrichment = client.post(f"/companies/{lakera['id']}/refresh-enrichment")
     assert refresh_enrichment.status_code == 200
 
+    add_baseline_page = client.post("/competitive-urls", json={"url": "https://concentric.ai/"})
+    assert add_baseline_page.status_code == 201
+    concentric_company_id = add_baseline_page.json()["company_id"]
+
     comparison = client.get("/comparison")
     assert comparison.status_code == 200
     comparison_payload = comparison.json()
     assert comparison_payload["baseline_company_name"] == "Concentric AI"
+    assert comparison_payload["baseline_company_id"]
     lakera_row = next(row for row in comparison_payload["competitors"] if row["company_name"] == "Lakera")
     assert lakera_row["linkedin_url"]
+
+    reverse_comparison = client.get(f"/comparison?baseline_company_id={lakera['id']}")
+    assert reverse_comparison.status_code == 200
+    reverse_payload = reverse_comparison.json()
+    assert reverse_payload["baseline_company_id"] == lakera["id"]
+    assert reverse_payload["baseline_company_name"] == "Lakera"
+    assert any(row["company_name"] == "Concentric AI" for row in reverse_payload["competitors"])
+
+    workspace = client.post(
+        "/analysis-workspaces",
+        json={
+            "name": "Lakera AI security market",
+            "description": "AI security peer group",
+            "market_domain": "AI security",
+            "company_ids": [lakera["id"], concentric_company_id],
+        },
+    )
+    assert workspace.status_code == 201
+    workspace_payload = workspace.json()
+    assert workspace_payload["description"] == "AI security peer group"
+    assert workspace_payload["market_domain"] == "AI security"
+    assert workspace_payload["target_company_name"] == "Lakera"
+    assert set(workspace_payload["company_ids"]) == {concentric_company_id, lakera["id"]}
+    assert set(workspace_payload["competitor_company_ids"]) == {concentric_company_id, lakera["id"]}
+
+    workspaces = client.get("/analysis-workspaces")
+    assert workspaces.status_code == 200
+    assert any(row["id"] == workspace_payload["id"] for row in workspaces.json())
+
+    workspace_comparison = client.get(
+        f"/comparison?analysis_workspace_id={workspace_payload['id']}&focus_anchor_company_id={lakera['id']}"
+    )
+    assert workspace_comparison.status_code == 200
+    workspace_comparison_payload = workspace_comparison.json()
+    assert workspace_comparison_payload["analysis_workspace_id"] == workspace_payload["id"]
+    assert workspace_comparison_payload["baseline_company_id"] == lakera["id"]
+    assert workspace_comparison_payload["focus_anchor_company_id"] == lakera["id"]
+    assert [row["company_id"] for row in workspace_comparison_payload["competitors"]] == [concentric_company_id]
+
+    swapped_workspace_comparison = client.get(
+        f"/comparison?analysis_workspace_id={workspace_payload['id']}&focus_anchor_company_id={concentric_company_id}"
+    )
+    assert swapped_workspace_comparison.status_code == 200
+    swapped_workspace_payload = swapped_workspace_comparison.json()
+    assert swapped_workspace_payload["baseline_company_id"] == concentric_company_id
+    assert [row["company_id"] for row in swapped_workspace_payload["competitors"]] == [lakera["id"]]
 
     briefing = client.get("/briefing")
     assert briefing.status_code == 200
@@ -150,11 +293,72 @@ def test_entity_merge_news_and_comparison(client, monkeypatch) -> None:
     assert any(step["id"] == "generate_briefing" for step in briefing_payload["onboarding"])
     assert briefing_payload["top_insights"][0]["evidence"]
 
+    lakera_briefing = client.get(f"/briefing?baseline_company_id={lakera['id']}")
+    assert lakera_briefing.status_code == 200
+    assert lakera_briefing.json()["baseline_company_id"] == lakera["id"]
+
+    workspace_briefing = client.get(
+        f"/briefing?analysis_workspace_id={workspace_payload['id']}&focus_anchor_company_id={lakera['id']}"
+    )
+    assert workspace_briefing.status_code == 200
+    workspace_briefing_payload = workspace_briefing.json()
+    assert workspace_briefing_payload["analysis_workspace_id"] == workspace_payload["id"]
+    assert workspace_briefing_payload["baseline_company_id"] == lakera["id"]
+    assert workspace_briefing_payload["focus_anchor_company_id"] == lakera["id"]
+    assert workspace_briefing_payload["totals"]["companies"] == 1
+
     ask = client.post("/ai/ask", json={"question": "Which competitor has the biggest product gap?"})
     assert ask.status_code == 200
     ask_payload = ask.json()
     assert ask_payload["answer"]
     assert ask_payload["recommended_next_step"]
+
+    scoped_ask = client.post(
+        "/ai/ask",
+        json={
+            "question": "Which competitor has the biggest product gap?",
+            "baseline_company_id": lakera["id"],
+        },
+    )
+    assert scoped_ask.status_code == 200
+    assert scoped_ask.json()["answer"]
+
+    workspace_ask = client.post(
+        "/ai/ask",
+        json={
+            "question": "Which competitor has the biggest product gap?",
+            "analysis_workspace_id": workspace_payload["id"],
+            "focus_anchor_company_id": lakera["id"],
+        },
+    )
+    assert workspace_ask.status_code == 200
+    assert workspace_ask.json()["answer"]
+
+    retarget = client.post(
+        "/api/v1/workspace/re-target",
+        json={
+            "workspace_id": workspace_payload["id"],
+            "new_target_company_id": concentric_company_id,
+            "company_ids": [lakera["id"], concentric_company_id],
+        },
+    )
+    assert retarget.status_code == 200, retarget.text
+    retarget_payload = retarget.json()
+    assert retarget_payload["target_company_id"] == concentric_company_id
+    assert retarget_payload["status"] == "ready"
+    assert retarget_payload["workspace"]["target_company_name"] == "Concentric AI"
+    assert set(retarget_payload["workspace"]["company_ids"]) == {concentric_company_id, lakera["id"]}
+    assert retarget_payload["workspace"]["retarget_job_id"] == retarget_payload["job_id"]
+    assert retarget_payload["workspace"]["target_version"] > workspace_payload["target_version"]
+
+    retargeted_comparison = client.get(
+        f"/comparison?analysis_workspace_id={workspace_payload['id']}&focus_anchor_company_id={concentric_company_id}"
+    )
+    assert retargeted_comparison.status_code == 200
+    retargeted_payload = retargeted_comparison.json()
+    assert retargeted_payload["baseline_company_id"] == concentric_company_id
+    assert [row["company_id"] for row in retargeted_payload["competitors"]] == [lakera["id"]]
+    assert all(row["company_id"] != concentric_company_id for row in retargeted_payload["competitors"])
 
 
 def test_market_signal_ingestion_filters_irrelevant_linkedin_posts(client, monkeypatch) -> None:
@@ -565,3 +769,159 @@ def test_auto_discover_competitors_endpoint(client, monkeypatch) -> None:
     names = {row["company_name"] for row in companies.json()}
     assert "Cyera" in names
     assert "Sentra" in names
+
+
+def test_workspace_auto_discovery_links_existing_and_new_sources(client, monkeypatch) -> None:
+    scrape_map = {
+        "https://www.cyera.com/": ScrapeResult(
+            http_status=200,
+            final_url="https://www.cyera.com/",
+            source_type="website",
+            page_title="Cyera Platform",
+            meta_description="Cyera DSPM",
+            headings=["DSPM"],
+            summary="Cyera summary",
+            company_name="Cyera",
+            publisher="Cyera",
+            published_at=None,
+            detected_features=[FeatureHit(name="Data Security Posture Management", category="Security")],
+            detected_tools=[],
+            confidence=0.84,
+        ),
+        "https://www.sentra.io/": ScrapeResult(
+            http_status=200,
+            final_url="https://www.sentra.io/",
+            source_type="website",
+            page_title="Sentra DSPM",
+            meta_description="Sentra DSPM",
+            headings=["Data Security"],
+            summary="Sentra summary",
+            company_name="Sentra",
+            publisher="Sentra",
+            published_at=None,
+            detected_features=[FeatureHit(name="Threat Detection", category="Detection")],
+            detected_tools=[],
+            confidence=0.82,
+        ),
+    }
+
+    def fake_landscape(market_domain: str, max_count: int = 7, include_news: bool = False) -> list[CompetitorCandidate]:
+        assert market_domain == "DSPM"
+        assert include_news is False
+        return [
+            CompetitorCandidate(company_name="Cyera", url="https://www.cyera.com/", segment="DSPM", source="catalog"),
+            CompetitorCandidate(company_name="Sentra", url="https://www.sentra.io/", segment="DSPM", source="catalog"),
+        ][:max_count]
+
+    monkeypatch.setattr("app.main.scrape_source_url", lambda url: scrape_map[url])
+    monkeypatch.setattr("app.main.fetch_company_news", lambda company_name, domain=None: [])
+    monkeypatch.setattr("app.main.fetch_linkedin_news", lambda company_name, linkedin_url=None: [])
+    monkeypatch.setattr("app.main.fetch_enrichment_news", lambda company_name, domain=None: {})
+    monkeypatch.setattr("app.main.discover_market_landscape_candidates", fake_landscape)
+
+    cyera = client.post("/competitive-urls", json={"url": "https://www.cyera.com/"})
+    assert cyera.status_code == 201
+    workspace = client.post(
+        "/analysis-workspaces",
+        json={
+            "name": "DSPM Market",
+            "market_domain": "DSPM",
+            "company_ids": [cyera.json()["company_id"]],
+        },
+    )
+    assert workspace.status_code == 201
+
+    response = client.post(
+        f"/competitors/auto-discover?max_candidates=10&include_news=false&analysis_workspace_id={workspace.json()['id']}"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["added_sources"] == 2
+    assert payload["failed_sources"] == 0
+
+    scoped_sources = client.get(f"/competitive-urls?analysis_workspace_id={workspace.json()['id']}")
+    assert scoped_sources.status_code == 200
+    assert {row["company_name"] for row in scoped_sources.json()} == {"Cyera", "Sentra"}
+
+
+def test_rescrape_preserves_workspace_link_when_url_redirects_to_existing_source(client, monkeypatch) -> None:
+    scrape_map = {
+        "https://existing.example/": ScrapeResult(
+            http_status=200,
+            final_url="https://existing.example/",
+            source_type="website",
+            page_title="ExistingCo",
+            meta_description="Existing security platform",
+            headings=["Cloud Security"],
+            summary="Existing summary",
+            company_name="ExistingCo",
+            publisher="ExistingCo",
+            published_at=None,
+            detected_features=[FeatureHit(name="Cloud Security", category="Cloud")],
+            detected_tools=[],
+            confidence=0.8,
+        ),
+        "https://temp.example/": ScrapeResult(
+            http_status=200,
+            final_url="https://temp.example/",
+            source_type="website",
+            page_title="TempCo",
+            meta_description="Temporary platform",
+            headings=["Workflow Automation"],
+            summary="Temporary summary",
+            company_name="TempCo",
+            publisher="TempCo",
+            published_at=None,
+            detected_features=[FeatureHit(name="Workflow Automation", category="Automation")],
+            detected_tools=[],
+            confidence=0.72,
+        ),
+    }
+
+    monkeypatch.setattr("app.main.scrape_source_url", lambda url: scrape_map[url])
+    monkeypatch.setattr("app.main.fetch_company_news", lambda company_name, domain=None: [])
+    monkeypatch.setattr("app.main.fetch_linkedin_news", lambda company_name, linkedin_url=None: [])
+    monkeypatch.setattr("app.main.fetch_enrichment_news", lambda company_name, domain=None: {})
+
+    existing = client.post("/competitive-urls", json={"url": "https://existing.example/"})
+    assert existing.status_code == 201
+    workspace = client.post(
+        "/analysis-workspaces",
+        json={
+            "name": "Redirect Market",
+            "market_domain": "Security",
+            "company_ids": [existing.json()["company_id"]],
+        },
+    )
+    assert workspace.status_code == 201
+
+    temp = client.post(
+        "/competitive-urls",
+        json={"url": "https://temp.example/", "analysis_workspace_id": workspace.json()["id"]},
+    )
+    assert temp.status_code == 201
+
+    scrape_map["https://temp.example/"] = ScrapeResult(
+        http_status=200,
+        final_url="https://existing.example/",
+        source_type="website",
+        page_title="ExistingCo",
+        meta_description="Existing security platform",
+        headings=["Cloud Security"],
+        summary="Existing summary",
+        company_name="ExistingCo",
+        publisher="ExistingCo",
+        published_at=None,
+        detected_features=[FeatureHit(name="Cloud Security", category="Cloud")],
+        detected_tools=[],
+        confidence=0.84,
+    )
+
+    rescraped = client.post(f"/competitive-urls/{temp.json()['id']}/rescrape")
+    assert rescraped.status_code == 200
+    assert rescraped.json()["id"] == existing.json()["id"]
+
+    scoped_sources = client.get(f"/competitive-urls?analysis_workspace_id={workspace.json()['id']}")
+    assert scoped_sources.status_code == 200
+    assert any(row["id"] == existing.json()["id"] for row in scoped_sources.json())

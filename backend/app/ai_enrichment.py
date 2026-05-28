@@ -221,9 +221,20 @@ def _build_signal_prompt(scrape: ScrapeResult) -> str:
     )
     evidence = evidence[:AI_SIGNAL_CONTEXT_CHARS]
     return (
-        "Extract JSON for features and tools/platforms from this page evidence.\n"
-        "Features are product capabilities, security domains, or workflow capabilities.\n"
-        "Tools are named platforms, products, vendors, clouds, data stores, or integrations.\n"
+        "Extract strict JSON for features and tools/platforms from this page evidence.\n"
+        "Return two signal arrays: features for what the vendor product does, and tools for named platforms, "
+        "clouds, data stores, applications, or integrations it runs on or connects with.\n"
+        "Prioritize these feature taxonomies when evidence supports them: Data Fabric, Data Governance, "
+        "Workflow Automation, Compliance Reporting, AI Security Controls, Sensitive Data Discovery, "
+        "Data Security Posture Management, Data Classification, Privacy Management, and Risk Analytics.\n"
+        "Infer concrete capabilities from semantic evidence. For example, finding or cataloging sensitive records "
+        "means Sensitive Data Discovery and Data Classification; audit-ready logs for GDPR/SOX means Compliance Reporting.\n"
+        "Prioritize these tool taxonomies when explicitly mentioned as supported environments or integrations: "
+        "AWS, Google Cloud, Azure, Snowflake, Databricks, Salesforce, Google Workspace, Microsoft 365, Slack, "
+        "ServiceNow, Jira, Confluence, and Okta.\n"
+        "Do not extract buzzwords such as digital transformation, next-gen architecture, or synergy. "
+        "Do not extract cookie/footer/admin tools such as CookieBot, Google Analytics, WordPress, or tag managers. "
+        "Do not extract internal programming languages unless framed as a user-facing plugin or integration.\n"
         "Use confidence from 0.0 to 1.0. Keep each evidence field short.\n\n"
         f"{evidence}"
     )

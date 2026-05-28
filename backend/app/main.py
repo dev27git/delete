@@ -18,9 +18,12 @@ from sqlalchemy.orm import Session, selectinload
 
 from .ai_enrichment import extract_ai_signals
 from .database import Base, SessionLocal, engine, get_db
-from .discovery import discover_competitor_candidates, list_competitor_catalog
+from .discovery import discover_competitor_candidates, discover_market_landscape_candidates, list_competitor_catalog
 from .enrichment import fetch_enrichment_news, list_enrichment_connectors
 from .models import (
+    AnalysisWorkspace,
+    AnalysisWorkspaceCompany,
+    AnalysisWorkspaceSource,
     CompanyClaim,
     CompanyMergeReview,
     CompanyNews,
@@ -29,6 +32,9 @@ from .models import (
     IngestionJob,
 )
 from .schemas import (
+    AnalysisWorkspaceCreate,
+    AnalysisWorkspaceRead,
+    AnalysisWorkspaceUpdate,
     AskConcentricRequest,
     AskConcentricResponse,
     AutoDiscoverResponse,
@@ -54,10 +60,18 @@ from .schemas import (
     MergeReviewRead,
     OnboardingStepRead,
     ToolSignal,
+    WorkspaceRetargetRequest,
+    WorkspaceRetargetResponse,
 )
 from .scraper import (
     FeatureHit,
     ToolHit,
+    _dedupe_feature_hits,
+    _dedupe_tool_hits,
+    _domain_feature_hints,
+    _domain_tool_hints,
+    _extract_features,
+    _extract_tools,
     derive_linkedin_company_url,
     extract_domain,
     extract_linkedin_company_url,
@@ -144,7 +158,15 @@ _scheduler_lock = threading.Lock()
 _refresh_cycle_lock = threading.Lock()
 _write_lock = threading.RLock()
 
-app = FastAPI(title="Concentric Competitive Intelligence API", version="0.3.0")
+WORKSPACE_STATUS_READY = "ready"
+WORKSPACE_STATUS_RECALCULATING = "recalculating_landscape"
+WORKSPACE_STATUS_DISCOVERING = "discovering_market"
+WORKSPACE_STATUS_HYDRATING = "hydrating_entities"
+WORKSPACE_STATUS_EXTRACTING = "extracting_signals"
+WORKSPACE_STATUS_CALCULATING = "calculating_gaps"
+WORKSPACE_STATUS_FAILED = "recalculation_failed"
+
+app = FastAPI(title="Competitive Intelligence API", version="0.4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -159,6 +181,7 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
+    _ensure_runtime_schema()
     _start_scheduler()
 
 
@@ -172,6 +195,122 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _ensure_runtime_schema() -> None:
+    """Small SQLite migration shim for local databases created before workspace isolation fields."""
+    if engine.dialect.name != "sqlite":
+        return
+    with engine.begin() as connection:
+        workspace_info = connection.exec_driver_sql("PRAGMA table_info(analysis_workspaces)").fetchall()
+        workspace_columns = {row[1] for row in workspace_info}
+        if not workspace_columns:
+            return
+        migrations = {
+            "description": "ALTER TABLE analysis_workspaces ADD COLUMN description TEXT",
+            "market_domain": "ALTER TABLE analysis_workspaces ADD COLUMN market_domain VARCHAR(180)",
+            "status": "ALTER TABLE analysis_workspaces ADD COLUMN status VARCHAR(40) NOT NULL DEFAULT 'ready'",
+            "status_message": "ALTER TABLE analysis_workspaces ADD COLUMN status_message TEXT",
+            "target_version": "ALTER TABLE analysis_workspaces ADD COLUMN target_version INTEGER NOT NULL DEFAULT 1",
+            "retarget_job_id": "ALTER TABLE analysis_workspaces ADD COLUMN retarget_job_id INTEGER",
+            "recalculated_at": "ALTER TABLE analysis_workspaces ADD COLUMN recalculated_at DATETIME",
+        }
+        for column, statement in migrations.items():
+            if column not in workspace_columns:
+                connection.exec_driver_sql(statement)
+        _ensure_workspace_target_nullable(connection)
+
+        membership_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(analysis_workspace_companies)").fetchall()
+        }
+        membership_migrations = {
+            "status": "ALTER TABLE analysis_workspace_companies ADD COLUMN status VARCHAR(40) NOT NULL DEFAULT 'enriched_new'",
+            "discovery_rank": "ALTER TABLE analysis_workspace_companies ADD COLUMN discovery_rank INTEGER",
+            "market_position": "ALTER TABLE analysis_workspace_companies ADD COLUMN market_position VARCHAR(80)",
+            "feature_set_json": "ALTER TABLE analysis_workspace_companies ADD COLUMN feature_set_json TEXT",
+            "tool_set_json": "ALTER TABLE analysis_workspace_companies ADD COLUMN tool_set_json TEXT",
+            "source_count": "ALTER TABLE analysis_workspace_companies ADD COLUMN source_count INTEGER NOT NULL DEFAULT 0",
+            "news_count": "ALTER TABLE analysis_workspace_companies ADD COLUMN news_count INTEGER NOT NULL DEFAULT 0",
+            "last_hydrated_at": "ALTER TABLE analysis_workspace_companies ADD COLUMN last_hydrated_at DATETIME",
+        }
+        for column, statement in membership_migrations.items():
+            if column not in membership_columns:
+                connection.exec_driver_sql(statement)
+
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS analysis_workspace_sources (
+                id INTEGER NOT NULL,
+                workspace_id INTEGER NOT NULL,
+                source_id INTEGER NOT NULL,
+                created_at DATETIME NOT NULL,
+                PRIMARY KEY (id),
+                CONSTRAINT uq_analysis_workspace_source UNIQUE (workspace_id, source_id),
+                FOREIGN KEY(workspace_id) REFERENCES analysis_workspaces (id) ON DELETE CASCADE,
+                FOREIGN KEY(source_id) REFERENCES company_sources (id) ON DELETE CASCADE
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_analysis_workspace_sources_workspace_id ON analysis_workspace_sources (workspace_id)"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_analysis_workspace_sources_source_id ON analysis_workspace_sources (source_id)"
+        )
+
+
+def _ensure_workspace_target_nullable(connection: Any) -> None:
+    target_info = next(
+        (row for row in connection.exec_driver_sql("PRAGMA table_info(analysis_workspaces)").fetchall() if row[1] == "target_company_id"),
+        None,
+    )
+    if not target_info or not target_info[3]:
+        return
+    connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    connection.exec_driver_sql(
+        """
+        CREATE TABLE IF NOT EXISTS analysis_workspaces_new (
+            id INTEGER NOT NULL,
+            name VARCHAR(180) NOT NULL,
+            description TEXT,
+            market_domain VARCHAR(180),
+            target_company_id INTEGER,
+            status VARCHAR(40) NOT NULL DEFAULT 'ready',
+            status_message TEXT,
+            target_version INTEGER NOT NULL DEFAULT 1,
+            retarget_job_id INTEGER,
+            recalculated_at DATETIME,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE (name),
+            FOREIGN KEY(target_company_id) REFERENCES company_profiles (id) ON DELETE CASCADE,
+            FOREIGN KEY(retarget_job_id) REFERENCES ingestion_jobs (id) ON DELETE SET NULL
+        )
+        """
+    )
+    connection.exec_driver_sql(
+        """
+        INSERT INTO analysis_workspaces_new (
+            id, name, description, market_domain, target_company_id, status, status_message,
+            target_version, retarget_job_id, recalculated_at, created_at, updated_at
+        )
+        SELECT
+            id, name, description, market_domain, target_company_id, status, status_message,
+            target_version, retarget_job_id, recalculated_at, created_at, updated_at
+        FROM analysis_workspaces
+        """
+    )
+    connection.exec_driver_sql("DROP TABLE analysis_workspaces")
+    connection.exec_driver_sql("ALTER TABLE analysis_workspaces_new RENAME TO analysis_workspaces")
+    connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_analysis_workspaces_id ON analysis_workspaces (id)")
+    connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_analysis_workspaces_name ON analysis_workspaces (name)")
+    connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_analysis_workspaces_market_domain ON analysis_workspaces (market_domain)")
+    connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_analysis_workspaces_status ON analysis_workspaces (status)")
+    connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_analysis_workspaces_target_company_id ON analysis_workspaces (target_company_id)")
+    connection.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_analysis_workspaces_retarget_job_id ON analysis_workspaces (retarget_job_id)")
+    connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+
+
 @app.get("/enrichment-connectors", response_model=list[EnrichmentConnectorRead])
 def list_connectors() -> list[EnrichmentConnectorRead]:
     return [
@@ -183,6 +322,8 @@ def list_connectors() -> list[EnrichmentConnectorRead]:
             site_domain=connector.site_domain,
             requires_api_key=connector.requires_api_key,
             enabled_by_default=connector.enabled_by_default,
+            target_url=connector.target_url,
+            strategic_value=connector.strategic_value,
         )
         for connector in list_enrichment_connectors()
     ]
@@ -324,6 +465,52 @@ def _load_headings(raw: str | None) -> list[str]:
     return [item for item in parsed if isinstance(item, str)]
 
 
+def _feature_hits_to_signals(items: list[FeatureHit]) -> list[FeatureSignal]:
+    return [FeatureSignal(name=item.name, category=item.category) for item in items]
+
+
+def _tool_hits_to_signals(items: list[ToolHit]) -> list[ToolSignal]:
+    return [ToolSignal(name=item.name, category=item.category) for item in items]
+
+
+def _source_signal_text(source: CompanySource) -> str:
+    return " ".join(
+        item
+        for item in [
+            source.source_url,
+            source.source_domain,
+            source.detected_company_name or "",
+            source.page_title or "",
+            source.meta_description or "",
+            " ".join(_load_headings(source.headings_json)),
+            source.summary or "",
+        ]
+        if item
+    )
+
+
+def _source_features(source: CompanySource) -> list[FeatureSignal]:
+    stored = _load_features(source.extracted_features_json)
+    fallback_hits = _dedupe_feature_hits(
+        [
+            *_extract_features(_source_signal_text(source)),
+            *_domain_feature_hints(source.source_url),
+        ]
+    )
+    return _merge_feature_sets(stored, _feature_hits_to_signals(fallback_hits))
+
+
+def _source_tools(source: CompanySource) -> list[ToolSignal]:
+    stored = _load_tools(source.extracted_tools_json)
+    fallback_hits = _dedupe_tool_hits(
+        [
+            *_extract_tools(_source_signal_text(source)),
+            *_domain_tool_hints(source.source_url),
+        ]
+    )
+    return _merge_tool_sets(stored, _tool_hits_to_signals(fallback_hits))
+
+
 def _serialize_source(source: CompanySource) -> CompetitiveURLRead:
     company_name = None
     if source.company:
@@ -344,8 +531,8 @@ def _serialize_source(source: CompanySource) -> CompetitiveURLRead:
         meta_description=source.meta_description,
         headings=_load_headings(source.headings_json),
         summary=source.summary,
-        detected_features=_load_features(source.extracted_features_json),
-        detected_tools=_load_tools(source.extracted_tools_json),
+        detected_features=_source_features(source),
+        detected_tools=_source_tools(source),
         last_error=source.last_error,
         published_at=source.published_at,
         scraped_at=source.scraped_at,
@@ -426,6 +613,613 @@ def _serialize_ingestion_job(job: IngestionJob) -> IngestionJobRead:
         finished_at=job.finished_at,
         created_at=job.created_at,
     )
+
+
+def _payload_field_was_set(payload: Any, field_name: str) -> bool:
+    fields_set = getattr(payload, "model_fields_set", None)
+    if fields_set is None:
+        fields_set = getattr(payload, "__fields_set__", set())
+    return field_name in fields_set
+
+
+def _clean_workspace_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = value.strip()
+    return text or None
+
+
+def _workspace_company_ids(workspace: AnalysisWorkspace) -> set[int]:
+    company_ids = {membership.company_id for membership in workspace.competitors}
+    if workspace.target_company_id:
+        company_ids.add(workspace.target_company_id)
+    return company_ids
+
+
+def _workspace_company_ids_from_payload(payload: Any) -> list[int]:
+    if _payload_field_was_set(payload, "company_ids") and getattr(payload, "company_ids", None) is not None:
+        raw_company_ids = payload.company_ids
+    elif getattr(payload, "competitor_company_ids", None) is not None:
+        raw_company_ids = payload.competitor_company_ids
+    else:
+        raw_company_ids = []
+    company_ids = {int(company_id) for company_id in raw_company_ids if int(company_id) > 0}
+    if getattr(payload, "target_company_id", None):
+        company_ids.add(int(payload.target_company_id))
+    return sorted(company_ids)
+
+
+def _serialize_analysis_workspace(workspace: AnalysisWorkspace) -> AnalysisWorkspaceRead:
+    company_ids = sorted(_workspace_company_ids(workspace))
+    target_company_name = (
+        _safe_company_name(workspace.target_company.company_name, workspace.target_company.primary_domain)
+        if workspace.target_company
+        else None
+    )
+    return AnalysisWorkspaceRead(
+        id=workspace.id,
+        name=workspace.name,
+        description=workspace.description,
+        market_domain=workspace.market_domain,
+        target_company_id=workspace.target_company_id,
+        target_company_name=target_company_name,
+        default_focus_company_id=workspace.target_company_id,
+        default_focus_company_name=target_company_name,
+        company_ids=company_ids,
+        company_count=len(company_ids),
+        competitor_company_ids=company_ids,
+        competitor_count=len(company_ids),
+        status=workspace.status or WORKSPACE_STATUS_READY,
+        status_message=workspace.status_message,
+        target_version=workspace.target_version or 1,
+        retarget_job_id=workspace.retarget_job_id,
+        recalculated_at=workspace.recalculated_at,
+        created_at=workspace.created_at,
+        updated_at=workspace.updated_at,
+    )
+
+
+def _load_analysis_workspace(db: Session, workspace_id: int) -> AnalysisWorkspace:
+    workspace = db.scalar(
+        select(AnalysisWorkspace)
+        .where(AnalysisWorkspace.id == workspace_id)
+        .execution_options(populate_existing=True)
+        .options(
+            selectinload(AnalysisWorkspace.target_company),
+            selectinload(AnalysisWorkspace.competitors).selectinload(AnalysisWorkspaceCompany.company),
+        )
+    )
+    if not workspace:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis workspace not found")
+    return workspace
+
+
+def _validate_company_ids(db: Session, company_ids: set[int]) -> set[int]:
+    if not company_ids:
+        return set()
+    existing_ids = set(db.scalars(select(CompanyProfile.id).where(CompanyProfile.id.in_(company_ids))).all())
+    missing_ids = company_ids - existing_ids
+    if missing_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Company id(s) not found: {', '.join(str(item) for item in sorted(missing_ids))}",
+        )
+    return existing_ids
+
+
+def _set_workspace_companies(
+    db: Session,
+    workspace: AnalysisWorkspace,
+    company_ids: list[int],
+) -> None:
+    normalized_company_ids = {int(company_id) for company_id in company_ids if int(company_id) > 0}
+    _validate_company_ids(db, normalized_company_ids)
+    existing_by_company_id = {membership.company_id: membership for membership in workspace.competitors}
+    workspace.competitors[:] = [
+        membership for membership in workspace.competitors if membership.company_id in normalized_company_ids
+    ]
+    for company_id in sorted(normalized_company_ids - set(existing_by_company_id)):
+        workspace.competitors.append(AnalysisWorkspaceCompany(company_id=company_id))
+
+
+def _set_workspace_competitors(
+    db: Session,
+    workspace: AnalysisWorkspace,
+    competitor_company_ids: list[int],
+) -> None:
+    _set_workspace_companies(db, workspace, competitor_company_ids)
+
+
+def _upsert_workspace_membership(
+    db: Session,
+    workspace: AnalysisWorkspace,
+    company_id: int,
+    *,
+    discovery_rank: int | None = None,
+    market_position: str | None = None,
+) -> AnalysisWorkspaceCompany:
+    membership = next((item for item in workspace.competitors if item.company_id == company_id), None)
+    if membership is None:
+        membership = AnalysisWorkspaceCompany(company_id=company_id)
+        workspace.competitors.append(membership)
+        db.flush()
+    if discovery_rank is not None:
+        membership.discovery_rank = discovery_rank
+    if market_position:
+        membership.market_position = market_position
+    membership.status = "enriched_new"
+    return membership
+
+
+def _link_workspace_source(db: Session, workspace_id: int, source_id: int) -> None:
+    exists = db.scalar(
+        select(AnalysisWorkspaceSource).where(
+            AnalysisWorkspaceSource.workspace_id == workspace_id,
+            AnalysisWorkspaceSource.source_id == source_id,
+        )
+    )
+    if not exists:
+        db.add(AnalysisWorkspaceSource(workspace_id=workspace_id, source_id=source_id))
+
+
+def _workspace_linked_sources(db: Session, workspace_id: int, company_id: int) -> list[CompanySource]:
+    source_ids = db.scalars(
+        select(AnalysisWorkspaceSource.source_id).where(AnalysisWorkspaceSource.workspace_id == workspace_id)
+    ).all()
+    if not source_ids:
+        return []
+    return db.scalars(
+        select(CompanySource)
+        .where(
+            CompanySource.id.in_(source_ids),
+            CompanySource.company_id == company_id,
+        )
+        .order_by(CompanySource.confidence.desc(), CompanySource.updated_at.desc())
+    ).all()
+
+
+def _refresh_workspace_member_snapshot(
+    db: Session,
+    workspace: AnalysisWorkspace,
+    membership: AnalysisWorkspaceCompany,
+) -> None:
+    company = db.get(CompanyProfile, membership.company_id)
+    if not company:
+        return
+    sources = _workspace_linked_sources(db=db, workspace_id=workspace.id, company_id=membership.company_id)
+    if not sources:
+        # Legacy/manual workspaces created before source links still need useful comparisons.
+        sources = db.scalars(
+            select(CompanySource)
+            .where(CompanySource.company_id == membership.company_id)
+            .order_by(CompanySource.confidence.desc(), CompanySource.updated_at.desc())
+        ).all()
+
+    merged_features: list[FeatureSignal] = []
+    merged_tools: list[ToolSignal] = []
+    for source in sources:
+        merged_features = _merge_feature_sets(merged_features, _source_features(source))
+        merged_tools = _merge_tool_sets(merged_tools, _source_tools(source))
+
+    membership.feature_set_json = _dump_features(merged_features)
+    membership.tool_set_json = _dump_tools(merged_tools)
+    membership.source_count = len(sources)
+    membership.news_count = company.news_count or 0
+    membership.last_hydrated_at = _now()
+    membership.status = "enriched_new" if sources else "discovered"
+
+
+def _refresh_workspace_snapshots(db: Session, workspace: AnalysisWorkspace) -> None:
+    for membership in list(workspace.competitors):
+        _refresh_workspace_member_snapshot(db=db, workspace=workspace, membership=membership)
+
+
+def _attach_source_to_workspace(
+    db: Session,
+    *,
+    workspace: AnalysisWorkspace,
+    source: CompanySource,
+) -> None:
+    if not source.company_id:
+        return
+    membership = _upsert_workspace_membership(
+        db=db,
+        workspace=workspace,
+        company_id=source.company_id,
+    )
+    _link_workspace_source(db=db, workspace_id=workspace.id, source_id=source.id)
+    _refresh_workspace_member_snapshot(db=db, workspace=workspace, membership=membership)
+    if workspace.target_company_id is None:
+        workspace.target_company_id = source.company_id
+    if workspace.status != WORKSPACE_STATUS_READY:
+        workspace.status = WORKSPACE_STATUS_READY
+        workspace.status_message = "Discovered sources added; workspace is ready."
+
+
+def _refresh_workspace_links_for_source(
+    db: Session,
+    *,
+    source: CompanySource,
+    workspace_ids: list[int] | None = None,
+) -> None:
+    target_workspace_ids = workspace_ids
+    if target_workspace_ids is None:
+        target_workspace_ids = list(
+            db.scalars(
+                select(AnalysisWorkspaceSource.workspace_id).where(
+                    AnalysisWorkspaceSource.source_id == source.id
+                )
+            ).all()
+        )
+    for workspace_id in dict.fromkeys(target_workspace_ids):
+        workspace = _load_analysis_workspace(db, workspace_id)
+        _attach_source_to_workspace(db=db, workspace=workspace, source=source)
+
+
+def _workspace_member_features(
+    membership: AnalysisWorkspaceCompany | None,
+    company: CompanyProfile,
+) -> list[FeatureSignal]:
+    if membership and membership.feature_set_json is not None:
+        return _load_features(membership.feature_set_json)
+    return _load_features(company.feature_set_json)
+
+
+def _workspace_member_tools(
+    membership: AnalysisWorkspaceCompany | None,
+    company: CompanyProfile,
+) -> list[ToolSignal]:
+    if membership and membership.tool_set_json is not None:
+        return _load_tools(membership.tool_set_json)
+    return _load_tools(company.tool_set_json)
+
+
+def _run_workspace_landscape_discovery_job(workspace_id: int, job_id: int) -> None:
+    db = SessionLocal()
+    try:
+        with _write_lock:
+            workspace = _load_analysis_workspace(db, workspace_id)
+            job = db.get(IngestionJob, job_id)
+            if job:
+                job.status = "running"
+                job.started_at = job.started_at or _now()
+            market_domain = _clean_workspace_text(workspace.market_domain) or workspace.name
+            workspace.status = WORKSPACE_STATUS_DISCOVERING
+            workspace.status_message = f"Scoping the {market_domain} landscape..."
+            db.flush()
+
+            candidates = discover_market_landscape_candidates(
+                market_domain=market_domain,
+                max_count=7,
+                include_news=False,
+            )
+            if not candidates:
+                raise RuntimeError(f"No vendors discovered for market domain: {market_domain}")
+
+            workspace.status = WORKSPACE_STATUS_HYDRATING
+            workspace.status_message = "Hydrating discovered vendor entities..."
+            db.flush()
+
+            hydrated_company_ids: list[int] = []
+            source_urls: list[str] = []
+            for rank, candidate in enumerate(candidates, start=1):
+                url = normalize_url(candidate.url)
+                domain = extract_domain(url)
+                if not url or not domain:
+                    continue
+                source = db.scalar(select(CompanySource).where(CompanySource.source_url == url))
+                if source is None:
+                    source = CompanySource(
+                        source_url=url,
+                        source_domain=domain,
+                        source_type="discovered",
+                        confidence=0.0,
+                        scraped_at=_now(),
+                        detected_company_name=candidate.company_name,
+                    )
+                    db.add(source)
+                    db.flush()
+
+                if source.company_id is None or source.extracted_features_json is None or source.last_error:
+                    source = _scrape_and_merge_source(
+                        db=db,
+                        source=source,
+                        refresh_market_signals=False,
+                    )
+
+                if source.company_id is None:
+                    continue
+
+                membership = _upsert_workspace_membership(
+                    db=db,
+                    workspace=workspace,
+                    company_id=source.company_id,
+                    discovery_rank=rank,
+                    market_position="leader" if rank == 1 else "peer",
+                )
+                _link_workspace_source(db=db, workspace_id=workspace.id, source_id=source.id)
+                _refresh_workspace_member_snapshot(db=db, workspace=workspace, membership=membership)
+                hydrated_company_ids.append(source.company_id)
+                source_urls.append(source.source_url)
+
+            if not hydrated_company_ids:
+                raise RuntimeError(f"No vendor entities could be hydrated for market domain: {market_domain}")
+
+            workspace.status = WORKSPACE_STATUS_EXTRACTING
+            workspace.status_message = "Extracting workspace-local features, tools, and source signals..."
+            _refresh_workspace_snapshots(db=db, workspace=workspace)
+            db.flush()
+
+            anchor_membership = sorted(
+                workspace.competitors,
+                key=lambda item: (
+                    item.discovery_rank if item.discovery_rank is not None else 999,
+                    -item.source_count,
+                    item.company_id,
+                ),
+            )[0]
+            workspace.target_company_id = anchor_membership.company_id
+            workspace.target_version = (workspace.target_version or 1) + 1
+
+            workspace.status = WORKSPACE_STATUS_CALCULATING
+            workspace.status_message = "Calculating the initial gap matrix..."
+            db.flush()
+            _build_comparison(
+                db=db,
+                analysis_workspace_id=workspace.id,
+                focus_anchor_company_id=workspace.target_company_id,
+                refresh_baseline=False,
+                scrape_missing_baseline=False,
+            )
+
+            workspace.status = WORKSPACE_STATUS_READY
+            workspace.status_message = "Autonomous landscape discovery complete."
+            workspace.recalculated_at = _now()
+            if job:
+                job.status = "success"
+                job.result_summary = json.dumps(
+                    {
+                        "workspace_id": workspace.id,
+                        "market_domain": market_domain,
+                        "companies": len(set(hydrated_company_ids)),
+                        "sources": source_urls,
+                        "default_focus_company_id": workspace.target_company_id,
+                    },
+                    ensure_ascii=True,
+                )
+                job.finished_at = _now()
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        with _write_lock:
+            workspace = db.get(AnalysisWorkspace, workspace_id)
+            if workspace:
+                workspace.status = WORKSPACE_STATUS_FAILED
+                workspace.status_message = str(exc)
+            if job := db.get(IngestionJob, job_id):
+                job.status = "failed"
+                job.error_message = str(exc)
+                job.finished_at = _now()
+            db.commit()
+    finally:
+        db.close()
+
+
+def _start_workspace_discovery(workspace_id: int, job_id: int) -> None:
+    if os.getenv("WORKSPACE_DISCOVERY_INLINE", "0").lower() in {"1", "true", "yes"} or "PYTEST_CURRENT_TEST" in os.environ:
+        _run_workspace_landscape_discovery_job(workspace_id=workspace_id, job_id=job_id)
+        return
+    thread = threading.Thread(
+        target=_run_workspace_landscape_discovery_job,
+        kwargs={"workspace_id": workspace_id, "job_id": job_id},
+        daemon=True,
+    )
+    thread.start()
+
+
+def _validate_workspace_name_available(db: Session, name: str, workspace_id: int | None = None) -> None:
+    duplicate_stmt = select(AnalysisWorkspace).where(func.lower(AnalysisWorkspace.name) == name.lower())
+    if workspace_id is not None:
+        duplicate_stmt = duplicate_stmt.where(AnalysisWorkspace.id != workspace_id)
+    if db.scalar(duplicate_stmt):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Analysis workspace name already exists")
+
+
+def _resolve_retarget_target(
+    db: Session,
+    *,
+    new_target_company_id: int | None,
+    domain: str | None,
+    force_rescrape: bool = False,
+) -> CompanyProfile:
+    if new_target_company_id is not None:
+        target = db.get(CompanyProfile, new_target_company_id)
+        if not target:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target company not found")
+        return target
+
+    normalized = normalize_url(domain or "")
+    target_domain = extract_domain(normalized)
+    if not target_domain:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide new_target_company_id or a valid domain",
+        )
+
+    target = db.scalar(select(CompanyProfile).where(CompanyProfile.primary_domain == target_domain).limit(1))
+    if target:
+        return target
+
+    source = db.scalar(
+        select(CompanySource)
+        .where(CompanySource.source_domain == target_domain)
+        .options(selectinload(CompanySource.company))
+        .limit(1)
+    )
+    if source and source.company and not force_rescrape:
+        return source.company
+
+    if source is None:
+        source = CompanySource(
+            source_url=normalized,
+            source_domain=target_domain,
+            source_type="website",
+            confidence=0.0,
+            scraped_at=_now(),
+        )
+        db.add(source)
+        db.flush()
+
+    source = _scrape_and_merge_source(db=db, source=source, refresh_market_signals=True)
+    if source.company:
+        return source.company
+
+    return _resolve_or_create_company(
+        db=db,
+        company_name=infer_company_name_from_domain(target_domain),
+        domain=target_domain,
+        source_url=normalized,
+        source=source,
+    )
+
+
+def _resolve_workspace_for_retarget(
+    db: Session,
+    *,
+    workspace_id: int | None,
+    target: CompanyProfile,
+    requested_name: str | None = None,
+) -> tuple[AnalysisWorkspace, bool]:
+    if workspace_id is not None:
+        return _load_analysis_workspace(db, workspace_id), False
+
+    workspaces = db.scalars(
+        select(AnalysisWorkspace)
+        .options(
+            selectinload(AnalysisWorkspace.target_company),
+            selectinload(AnalysisWorkspace.competitors).selectinload(AnalysisWorkspaceCompany.company),
+        )
+        .order_by(AnalysisWorkspace.updated_at.desc(), AnalysisWorkspace.name.asc())
+    ).all()
+    if len(workspaces) == 1:
+        return workspaces[0], False
+    if len(workspaces) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="workspace_id is required when multiple analysis workspaces exist",
+        )
+
+    target_name = _safe_company_name(target.company_name, target.primary_domain)
+    name = (requested_name or f"{target_name} Competitive Landscape").strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Analysis workspace name is required")
+    _validate_workspace_name_available(db, name)
+    workspace = AnalysisWorkspace(name=name, target_company_id=target.id)
+    db.add(workspace)
+    db.flush()
+    all_company_ids = set(db.scalars(select(CompanyProfile.id)).all())
+    _set_workspace_companies(db, workspace, sorted(all_company_ids))
+    return workspace, True
+
+
+def _run_workspace_retarget_pipeline(
+    db: Session,
+    *,
+    workspace_id: int,
+    target_company_id: int,
+    target_version: int,
+    job_id: int,
+    force_rescrape: bool = False,
+) -> AnalysisWorkspace:
+    workspace = _load_analysis_workspace(db, workspace_id)
+    job = db.get(IngestionJob, job_id)
+    target = db.scalar(
+        select(CompanyProfile)
+        .where(CompanyProfile.id == target_company_id)
+        .options(
+            selectinload(CompanyProfile.sources),
+            selectinload(CompanyProfile.news_items),
+            selectinload(CompanyProfile.claims),
+        )
+    )
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target company not found")
+
+    phase_summary: dict[str, Any] = {
+        "phase_a_target_baseline": {},
+        "phase_b_competitor_remap": {},
+        "phase_c_gap_matrix": {},
+    }
+    try:
+        if force_rescrape:
+            for source in list(target.sources):
+                _scrape_and_merge_source(db=db, source=source, refresh_market_signals=False)
+            db.flush()
+            target = db.get(CompanyProfile, target_company_id) or target
+
+        news_counts = _refresh_company_news(db=db, company=target)
+        enrichment_counts = _refresh_company_enrichment(db=db, company=target)
+        _recompute_company_profile(db=db, company=target)
+        phase_summary["phase_a_target_baseline"] = {
+            "features": len(_load_features(target.feature_set_json)),
+            "tools": len(_load_tools(target.tool_set_json)),
+            "news": news_counts,
+            "enrichment": enrichment_counts,
+        }
+
+        workspace_company_ids = _workspace_company_ids(workspace)
+        competitor_ids = sorted(workspace_company_ids - {target_company_id})
+        competitors = db.scalars(
+            select(CompanyProfile).where(CompanyProfile.id.in_(competitor_ids))
+            if competitor_ids
+            else select(CompanyProfile).where(CompanyProfile.id == -1)
+        ).all()
+        for competitor in competitors:
+            _recompute_company_profile(db=db, company=competitor)
+        phase_summary["phase_b_competitor_remap"] = {"competitors": len(competitors)}
+
+        comparison = _build_comparison(
+            db=db,
+            analysis_workspace_id=workspace_id,
+            focus_anchor_company_id=target_company_id,
+            refresh_baseline=False,
+            scrape_missing_baseline=False,
+        )
+        phase_summary["phase_c_gap_matrix"] = {
+            "rows": len(comparison.competitors),
+            "max_gap_score": max((row.gap_score for row in comparison.competitors), default=0),
+        }
+
+        workspace = _load_analysis_workspace(db, workspace_id)
+        workspace.status = WORKSPACE_STATUS_READY
+        workspace.status_message = "Landscape recalculated successfully."
+        workspace.recalculated_at = _now()
+        workspace.target_version = target_version
+        if job:
+            job.status = "success"
+            job.result_summary = json.dumps(
+                {
+                    "workspace_id": workspace_id,
+                    "target_company_id": target_company_id,
+                    "target_version": target_version,
+                    **phase_summary,
+                },
+                ensure_ascii=True,
+            )
+            job.finished_at = _now()
+        db.commit()
+        return _load_analysis_workspace(db, workspace_id)
+    except Exception as exc:
+        db.rollback()
+        workspace = _load_analysis_workspace(db, workspace_id)
+        workspace.status = WORKSPACE_STATUS_FAILED
+        workspace.status_message = str(exc)
+        if job := db.get(IngestionJob, job_id):
+            job.status = "failed"
+            job.error_message = str(exc)
+            job.finished_at = _now()
+        db.commit()
+        raise
 
 
 def _serialize_company_summary(
@@ -613,6 +1407,7 @@ def _build_onboarding_steps(
     baseline: CompanyProfile,
     coverage_health: list[CoverageHealthRead],
 ) -> list[OnboardingStepRead]:
+    baseline_name = _safe_company_name(baseline.company_name, baseline.primary_domain)
     baseline_features = _load_features(baseline.feature_set_json)
     baseline_tools = _load_tools(baseline.tool_set_json)
     healthy_companies = [item for item in coverage_health if item.status == "healthy"]
@@ -635,13 +1430,13 @@ def _build_onboarding_steps(
         OnboardingStepRead(
             id="generate_briefing",
             label="Generate first briefing",
-            description="Concentric turns sources into a short list of strategic signals and evidence.",
+            description="The analyst layer turns sources into a short list of strategic signals and evidence.",
             status=status_for(insight_count > 0, source_count > 0),
         ),
         OnboardingStepRead(
-            id="profile_concentric",
-            label="Confirm Concentric baseline",
-            description="Add or scrape Concentric product evidence so gaps are compared against your real posture.",
+            id="profile_baseline",
+            label="Confirm analysis target",
+            description=f"Add or scrape {baseline_name} product evidence so gaps are compared against the right baseline.",
             status=status_for(bool(baseline_features or baseline_tools), baseline.source_count > 0),
         ),
         OnboardingStepRead(
@@ -653,7 +1448,7 @@ def _build_onboarding_steps(
         OnboardingStepRead(
             id="review_gap",
             label="Review first strategic gap",
-            description="Open the gap view once the briefing identifies a competitor capability Concentric lacks.",
+            description=f"Open the gap view once the briefing identifies a competitor capability {baseline_name} lacks.",
             status=status_for(insight_count > 0 and competitor_count > 0),
         ),
     ]
@@ -1045,8 +1840,8 @@ def _upsert_company_claim(
 
 
 def _refresh_claims_from_source(db: Session, company: CompanyProfile, source: CompanySource) -> None:
-    features = _load_features(source.extracted_features_json)
-    tools = _load_tools(source.extracted_tools_json)
+    features = _source_features(source)
+    tools = _source_tools(source)
     for feature in features:
         _upsert_company_claim(
             db=db,
@@ -1320,8 +2115,8 @@ def _recompute_company_profile(db: Session, company: CompanyProfile) -> None:
                         company.company_key = repaired_key
 
     for source in sources:
-        merged_features = _merge_feature_sets(merged_features, _load_features(source.extracted_features_json))
-        merged_tools = _merge_tool_sets(merged_tools, _load_tools(source.extracted_tools_json))
+        merged_features = _merge_feature_sets(merged_features, _source_features(source))
+        merged_tools = _merge_tool_sets(merged_tools, _source_tools(source))
 
     company.feature_set_json = _dump_features(merged_features)
     company.tool_set_json = _dump_tools(merged_tools)
@@ -1546,12 +2341,25 @@ def _scrape_and_merge_source(
 
 
 @app.get("/competitive-urls", response_model=list[CompetitiveURLRead])
-def list_competitive_urls(db: Session = Depends(get_db)) -> list[CompetitiveURLRead]:
+def list_competitive_urls(
+    analysis_workspace_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> list[CompetitiveURLRead]:
     stmt: Select[Any] = (
         select(CompanySource)
         .options(selectinload(CompanySource.company))
         .order_by(CompanySource.updated_at.desc())
     )
+    if analysis_workspace_id is not None:
+        _load_analysis_workspace(db, analysis_workspace_id)
+        source_ids = db.scalars(
+            select(AnalysisWorkspaceSource.source_id).where(
+                AnalysisWorkspaceSource.workspace_id == analysis_workspace_id
+            )
+        ).all()
+        if not source_ids:
+            return []
+        stmt = stmt.where(CompanySource.id.in_(source_ids))
     sources = db.scalars(stmt).all()
     return [_serialize_source(source) for source in sources]
 
@@ -1565,22 +2373,27 @@ def add_competitive_url(payload: CompetitiveURLCreate, db: Session = Depends(get
         domain = extract_domain(normalized)
         if not domain:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
+        workspace = _load_analysis_workspace(db, payload.analysis_workspace_id) if payload.analysis_workspace_id else None
 
         existing = db.scalar(select(CompanySource).where(CompanySource.source_url == normalized))
         if existing:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="URL already exists")
-
-        source = CompanySource(
-            source_url=normalized,
-            source_domain=domain,
-            source_type="website",
-            confidence=0.0,
-            scraped_at=_now(),
-        )
-        db.add(source)
-        db.flush()
+            if not workspace:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="URL already exists")
+            source = existing
+        else:
+            source = CompanySource(
+                source_url=normalized,
+                source_domain=domain,
+                source_type="website",
+                confidence=0.0,
+                scraped_at=_now(),
+            )
+            db.add(source)
+            db.flush()
 
         source = _scrape_and_merge_source(db=db, source=source)
+        if workspace and source.company_id:
+            _attach_source_to_workspace(db=db, workspace=workspace, source=source)
         db.commit()
         db.refresh(source)
         return _serialize_source(source)
@@ -1591,12 +2404,25 @@ def auto_discover_competitors(
     max_candidates: int = Query(default=30, ge=5, le=200),
     include_news: bool = Query(default=True),
     refresh_market_signals: bool = Query(default=False),
+    analysis_workspace_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> AutoDiscoverResponse:
     with _write_lock:
-        candidates = discover_competitor_candidates(max_count=max_candidates, include_news=include_news)
+        workspace = _load_analysis_workspace(db, analysis_workspace_id) if analysis_workspace_id else None
+        if workspace and workspace.market_domain:
+            candidates = discover_market_landscape_candidates(
+                market_domain=workspace.market_domain,
+                max_count=max_candidates,
+                include_news=include_news,
+            )
+        else:
+            candidates = discover_competitor_candidates(max_count=max_candidates, include_news=include_news)
         existing_sources = db.scalars(select(CompanySource)).all()
-        existing_domains = {_canonical_domain(source.source_url) for source in existing_sources}
+        existing_sources_by_domain = {
+            _canonical_domain(source.source_url): source
+            for source in existing_sources
+        }
+        existing_domains = set(existing_sources_by_domain)
 
         added_sources = 0
         skipped_existing = 0
@@ -1614,7 +2440,13 @@ def auto_discover_competitors(
                 skipped_existing += 1
                 continue
             if domain in existing_domains:
-                skipped_existing += 1
+                existing_source = existing_sources_by_domain[domain]
+                if workspace:
+                    _attach_source_to_workspace(db=db, workspace=workspace, source=existing_source)
+                    urls_added.append(existing_source.source_url)
+                    added_sources += 1
+                else:
+                    skipped_existing += 1
                 continue
 
             source = CompanySource(
@@ -1626,7 +2458,8 @@ def auto_discover_competitors(
                 detected_company_name=candidate.company_name,
             )
             db.add(source)
-            db.flush()
+            db.commit()
+            db.refresh(source)
 
             created_source_id = source.id
             source = _scrape_and_merge_source(
@@ -1636,18 +2469,28 @@ def auto_discover_competitors(
             )
             existing_domains.add(domain)
             existing_domains.add(_canonical_domain(source.source_url))
+            existing_sources_by_domain[domain] = source
+            existing_sources_by_domain[_canonical_domain(source.source_url)] = source
             if source.id != created_source_id:
-                skipped_existing += 1
+                if workspace:
+                    _attach_source_to_workspace(db=db, workspace=workspace, source=source)
+                    urls_added.append(source.source_url)
+                    added_sources += 1
+                else:
+                    skipped_existing += 1
+                db.commit()
                 continue
 
+            if workspace:
+                _attach_source_to_workspace(db=db, workspace=workspace, source=source)
             urls_added.append(source.source_url)
             if source.last_error and source.company_id is None:
                 failed_sources += 1
                 errors.append(f"{source.source_url}: {source.last_error}")
             else:
                 added_sources += 1
+            db.commit()
 
-        db.commit()
         return AutoDiscoverResponse(
             candidates_considered=len(candidates),
             added_sources=added_sources,
@@ -1665,7 +2508,19 @@ def rescrape_competitive_url(source_id: int, db: Session = Depends(get_db)) -> C
         if not source:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
 
-        source = _scrape_and_merge_source(db=db, source=source)
+        linked_workspace_ids = list(
+            db.scalars(
+                select(AnalysisWorkspaceSource.workspace_id).where(
+                    AnalysisWorkspaceSource.source_id == source_id
+                )
+            ).all()
+        )
+        source = _scrape_and_merge_source(db=db, source=source, refresh_market_signals=False)
+        _refresh_workspace_links_for_source(
+            db=db,
+            source=source,
+            workspace_ids=linked_workspace_ids,
+        )
 
         db.commit()
         db.refresh(source)
@@ -1713,6 +2568,251 @@ def list_companies(db: Session = Depends(get_db)) -> list[CompanySummaryRead]:
         )
         for company in companies
     ]
+
+
+@app.get("/analysis-workspaces", response_model=list[AnalysisWorkspaceRead])
+def list_analysis_workspaces(db: Session = Depends(get_db)) -> list[AnalysisWorkspaceRead]:
+    workspaces = db.scalars(
+        select(AnalysisWorkspace)
+        .options(
+            selectinload(AnalysisWorkspace.target_company),
+            selectinload(AnalysisWorkspace.competitors).selectinload(AnalysisWorkspaceCompany.company),
+        )
+        .order_by(AnalysisWorkspace.updated_at.desc(), AnalysisWorkspace.name.asc())
+    ).all()
+    return [_serialize_analysis_workspace(workspace) for workspace in workspaces]
+
+
+@app.post("/analysis-workspaces", response_model=AnalysisWorkspaceRead, status_code=status.HTTP_201_CREATED)
+def create_analysis_workspace(
+    payload: AnalysisWorkspaceCreate,
+    db: Session = Depends(get_db),
+) -> AnalysisWorkspaceRead:
+    discovery_job: tuple[int, int] | None = None
+    with _write_lock:
+        name = payload.name.strip()
+        if len(name) < 2:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Analysis workspace name is required")
+        _validate_workspace_name_available(db, name)
+        company_ids = _workspace_company_ids_from_payload(payload)
+        market_domain = _clean_workspace_text(payload.market_domain)
+        if not company_ids:
+            if not market_domain:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Market Domain / Sector is required for autonomous workspace discovery",
+                )
+            workspace = AnalysisWorkspace(
+                name=name,
+                description=_clean_workspace_text(payload.description),
+                market_domain=market_domain,
+                target_company_id=None,
+                status=WORKSPACE_STATUS_DISCOVERING,
+                status_message="Autonomous Analyst Spinning Up...",
+            )
+            db.add(workspace)
+            db.flush()
+            job = IngestionJob(
+                job_type="workspace_landscape_discovery",
+                run_mode="autonomous",
+                status="running",
+                started_at=_now(),
+                result_summary=json.dumps({"workspace_id": workspace.id, "market_domain": market_domain}, ensure_ascii=True),
+            )
+            db.add(job)
+            db.flush()
+            workspace.retarget_job_id = job.id
+            discovery_job = (workspace.id, job.id)
+            db.commit()
+            response = _serialize_analysis_workspace(_load_analysis_workspace(db, workspace.id))
+        else:
+            _validate_company_ids(db, set(company_ids))
+            default_focus_company_id = payload.target_company_id or company_ids[0]
+            workspace = AnalysisWorkspace(
+                name=name,
+                description=_clean_workspace_text(payload.description),
+                market_domain=market_domain,
+                target_company_id=default_focus_company_id,
+            )
+            db.add(workspace)
+            db.flush()
+            _set_workspace_companies(db, workspace, company_ids)
+            _refresh_workspace_snapshots(db=db, workspace=workspace)
+            db.commit()
+            response = _serialize_analysis_workspace(_load_analysis_workspace(db, workspace.id))
+    if discovery_job:
+        _start_workspace_discovery(workspace_id=discovery_job[0], job_id=discovery_job[1])
+        with _write_lock:
+            refreshed = _load_analysis_workspace(db, discovery_job[0])
+            return _serialize_analysis_workspace(refreshed)
+    return response
+
+
+@app.put("/analysis-workspaces/{workspace_id}", response_model=AnalysisWorkspaceRead)
+def update_analysis_workspace(
+    workspace_id: int,
+    payload: AnalysisWorkspaceUpdate,
+    db: Session = Depends(get_db),
+) -> AnalysisWorkspaceRead:
+    with _write_lock:
+        workspace = _load_analysis_workspace(db, workspace_id)
+        if payload.name is not None:
+            name = payload.name.strip()
+            if len(name) < 2:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Analysis workspace name is required")
+            _validate_workspace_name_available(db, name, workspace_id=workspace.id)
+            workspace.name = name
+        if _payload_field_was_set(payload, "description"):
+            workspace.description = _clean_workspace_text(payload.description)
+        if _payload_field_was_set(payload, "market_domain"):
+            workspace.market_domain = _clean_workspace_text(payload.market_domain)
+        company_ids: list[int] | None = None
+        if _payload_field_was_set(payload, "company_ids") or payload.competitor_company_ids is not None:
+            company_ids = _workspace_company_ids_from_payload(payload)
+            if not company_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Select at least one tracked company for this workspace",
+                )
+            _validate_company_ids(db, set(company_ids))
+        if payload.target_company_id is not None:
+            _validate_company_ids(db, {payload.target_company_id})
+            if payload.target_company_id != workspace.target_company_id:
+                workspace.target_version = (workspace.target_version or 1) + 1
+                workspace.recalculated_at = None
+            workspace.target_company_id = payload.target_company_id
+        if company_ids is not None:
+            if workspace.target_company_id not in set(company_ids):
+                workspace.target_company_id = company_ids[0]
+            _set_workspace_companies(db, workspace, company_ids)
+        elif payload.target_company_id is not None:
+            current_company_ids = sorted(_workspace_company_ids(workspace) | {payload.target_company_id})
+            _set_workspace_companies(db, workspace, current_company_ids)
+        db.commit()
+        return _serialize_analysis_workspace(_load_analysis_workspace(db, workspace.id))
+
+
+@app.delete("/analysis-workspaces/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_analysis_workspace(workspace_id: int, db: Session = Depends(get_db)) -> Response:
+    with _write_lock:
+        workspace = _load_analysis_workspace(db, workspace_id)
+        db.delete(workspace)
+        db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _retarget_workspace(
+    payload: WorkspaceRetargetRequest,
+    db: Session,
+) -> WorkspaceRetargetResponse:
+    job_id: int
+    target_id: int
+    target_version: int
+    with _write_lock:
+        if payload.new_target_company_id is None and not (payload.domain or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Provide new_target_company_id or domain",
+            )
+        target = _resolve_retarget_target(
+            db,
+            new_target_company_id=payload.new_target_company_id,
+            domain=payload.domain,
+            force_rescrape=payload.force_rescrape,
+        )
+        workspace, created = _resolve_workspace_for_retarget(
+            db,
+            workspace_id=payload.workspace_id,
+            target=target,
+            requested_name=payload.name,
+        )
+        if workspace.status == WORKSPACE_STATUS_RECALCULATING:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Workspace is already recalculating")
+        if payload.name is not None:
+            name = payload.name.strip()
+            if len(name) < 2:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Analysis workspace name is required")
+            _validate_workspace_name_available(db, name, workspace_id=workspace.id)
+            workspace.name = name
+
+        target_id = target.id
+        existing_company_ids = sorted(_workspace_company_ids(workspace))
+        if payload.company_ids is not None:
+            workspace_company_ids = sorted({int(company_id) for company_id in payload.company_ids if int(company_id) > 0})
+        elif payload.competitor_company_ids is not None:
+            workspace_company_ids = sorted({int(company_id) for company_id in payload.competitor_company_ids if int(company_id) > 0})
+        else:
+            workspace_company_ids = existing_company_ids
+        if created and payload.company_ids is None and payload.competitor_company_ids is None:
+            all_company_ids = set(db.scalars(select(CompanyProfile.id)).all())
+            workspace_company_ids = sorted(all_company_ids)
+        workspace_company_ids = sorted(set(workspace_company_ids) | {target_id})
+
+        workspace.target_company_id = target_id
+        workspace.target_company = target
+        workspace.target_version = (workspace.target_version or 1) + 1
+        target_version = workspace.target_version
+        workspace.status = WORKSPACE_STATUS_RECALCULATING
+        workspace.status_message = "Recalculating Landscape..."
+        workspace.recalculated_at = None
+        _set_workspace_companies(db, workspace, workspace_company_ids)
+
+        job = IngestionJob(
+            job_type="workspace_retarget",
+            run_mode="manual",
+            status="running",
+            company_id=target_id,
+            started_at=_now(),
+        )
+        db.add(job)
+        db.flush()
+        workspace.retarget_job_id = job.id
+        job_id = job.id
+        db.commit()
+
+    try:
+        with _write_lock:
+            final_workspace = _run_workspace_retarget_pipeline(
+                db=db,
+                workspace_id=workspace.id,
+                target_company_id=target_id,
+                target_version=target_version,
+                job_id=job_id,
+                force_rescrape=payload.force_rescrape,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    return WorkspaceRetargetResponse(
+        workspace=_serialize_analysis_workspace(final_workspace),
+        job_id=job_id,
+        status=final_workspace.status,
+        target_company_id=final_workspace.target_company_id,
+        target_company_name=_safe_company_name(
+            final_workspace.target_company.company_name if final_workspace.target_company else None,
+            final_workspace.target_company.primary_domain if final_workspace.target_company else None,
+        ),
+    )
+
+
+@app.post("/api/v1/workspace/re-target", response_model=WorkspaceRetargetResponse)
+def retarget_active_workspace(
+    payload: WorkspaceRetargetRequest,
+    db: Session = Depends(get_db),
+) -> WorkspaceRetargetResponse:
+    return _retarget_workspace(payload=payload, db=db)
+
+
+@app.post("/analysis-workspaces/{workspace_id}/re-target", response_model=WorkspaceRetargetResponse)
+def retarget_analysis_workspace(
+    workspace_id: int,
+    payload: WorkspaceRetargetRequest,
+    db: Session = Depends(get_db),
+) -> WorkspaceRetargetResponse:
+    payload.workspace_id = workspace_id
+    return _retarget_workspace(payload=payload, db=db)
 
 
 @app.get("/companies/{company_id}", response_model=CompanyDetailRead)
@@ -1914,10 +3014,51 @@ def run_ingestion_cycle(db: Session = Depends(get_db)) -> dict[str, int]:
 def _build_comparison(
     db: Session,
     *,
+    analysis_workspace_id: int | None = None,
+    baseline_company_id: int | None = None,
+    focus_anchor_company_id: int | None = None,
     refresh_baseline: bool = False,
     scrape_missing_baseline: bool = True,
 ) -> ComparisonRead:
-    baseline = _ensure_baseline_profile(db, scrape_missing_source=scrape_missing_baseline)
+    workspace: AnalysisWorkspace | None = None
+    competitor_scope_ids: set[int] | None = None
+    if analysis_workspace_id is not None:
+        workspace = _load_analysis_workspace(db, analysis_workspace_id)
+        workspace_company_ids = _workspace_company_ids(workspace)
+        selected_focus_anchor_id = focus_anchor_company_id or baseline_company_id or workspace.target_company_id
+        if not workspace_company_ids or selected_focus_anchor_id is None:
+            label = workspace.market_domain or workspace.name
+            return ComparisonRead(
+                analysis_workspace_id=workspace.id,
+                analysis_workspace_name=workspace.name,
+                workspace_status=workspace.status,
+                workspace_status_message=workspace.status_message,
+                target_version=workspace.target_version,
+                focus_anchor_company_id=None,
+                focus_anchor_company_name=None,
+                baseline_company_id=None,
+                baseline_company_name=label,
+                baseline_features=[],
+                baseline_tools=[],
+                competitors=[],
+            )
+        if selected_focus_anchor_id not in workspace_company_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Focus anchor must be one of the workspace tracked companies",
+            )
+        baseline = db.get(CompanyProfile, selected_focus_anchor_id)
+        if not baseline:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis target company not found")
+        competitor_scope_ids = workspace_company_ids - {baseline.id}
+    elif focus_anchor_company_id is not None or baseline_company_id is not None:
+        selected_focus_anchor_id = focus_anchor_company_id or baseline_company_id
+        baseline = db.get(CompanyProfile, selected_focus_anchor_id)
+        if not baseline:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis target company not found")
+    else:
+        baseline = _ensure_baseline_profile(db, scrape_missing_source=scrape_missing_baseline)
+
     if refresh_baseline:
         try:
             with _write_lock:
@@ -1929,12 +3070,14 @@ def _build_comparison(
             db.rollback()
             baseline = db.get(CompanyProfile, baseline.id) or baseline
 
-    baseline_features = _load_features(baseline.feature_set_json)
-    baseline_tools = _load_tools(baseline.tool_set_json)
+    workspace_memberships = {membership.company_id: membership for membership in workspace.competitors} if workspace else {}
+    baseline_membership = workspace_memberships.get(baseline.id) if workspace else None
+    baseline_features = _workspace_member_features(baseline_membership, baseline)
+    baseline_tools = _workspace_member_tools(baseline_membership, baseline)
     baseline_feature_map = {item.name.lower(): item for item in baseline_features}
     baseline_tool_map = {item.name.lower(): item for item in baseline_tools}
 
-    competitors = db.scalars(
+    competitor_stmt = (
         select(CompanyProfile)
         .where(CompanyProfile.id != baseline.id)
         .options(
@@ -1943,12 +3086,20 @@ def _build_comparison(
             selectinload(CompanyProfile.claims),
         )
         .order_by(CompanyProfile.source_count.desc())
-    ).all()
+    )
+    if competitor_scope_ids is not None:
+        if not competitor_scope_ids:
+            competitors = []
+        else:
+            competitors = db.scalars(competitor_stmt.where(CompanyProfile.id.in_(competitor_scope_ids))).all()
+    else:
+        competitors = db.scalars(competitor_stmt).all()
 
     rows: list[CompetitorComparisonRead] = []
     for competitor in competitors:
-        competitor_features = _load_features(competitor.feature_set_json)
-        competitor_tools = _load_tools(competitor.tool_set_json)
+        competitor_membership = workspace_memberships.get(competitor.id) if workspace else None
+        competitor_features = _workspace_member_features(competitor_membership, competitor)
+        competitor_tools = _workspace_member_tools(competitor_membership, competitor)
         competitor_feature_map = {item.name.lower(): item for item in competitor_features}
         competitor_tool_map = {item.name.lower(): item for item in competitor_tools}
 
@@ -1995,6 +3146,14 @@ def _build_comparison(
 
     rows.sort(key=lambda row: row.gap_score, reverse=True)
     return ComparisonRead(
+        analysis_workspace_id=workspace.id if workspace else None,
+        analysis_workspace_name=workspace.name if workspace else None,
+        workspace_status=workspace.status if workspace else None,
+        workspace_status_message=workspace.status_message if workspace else None,
+        target_version=workspace.target_version if workspace else None,
+        focus_anchor_company_id=baseline.id,
+        focus_anchor_company_name=baseline.company_name,
+        baseline_company_id=baseline.id,
         baseline_company_name=baseline.company_name,
         baseline_features=baseline_features,
         baseline_tools=baseline_tools,
@@ -2002,17 +3161,80 @@ def _build_comparison(
     )
 
 
-def _build_briefing(db: Session) -> BriefingRead:
-    comparison = _build_comparison(db=db, refresh_baseline=False, scrape_missing_baseline=False)
+def _build_briefing(
+    db: Session,
+    baseline_company_id: int | None = None,
+    analysis_workspace_id: int | None = None,
+    focus_anchor_company_id: int | None = None,
+) -> BriefingRead:
+    comparison = _build_comparison(
+        db=db,
+        analysis_workspace_id=analysis_workspace_id,
+        baseline_company_id=baseline_company_id,
+        focus_anchor_company_id=focus_anchor_company_id,
+        refresh_baseline=False,
+        scrape_missing_baseline=False,
+    )
+    if comparison.baseline_company_id is None:
+        workspace_label = comparison.analysis_workspace_name or "this workspace"
+        status_message = comparison.workspace_status_message or "Autonomous Analyst Spinning Up..."
+        return BriefingRead(
+            date=_now(),
+            analysis_workspace_id=comparison.analysis_workspace_id,
+            analysis_workspace_name=comparison.analysis_workspace_name,
+            workspace_status=comparison.workspace_status,
+            workspace_status_message=comparison.workspace_status_message,
+            target_version=comparison.target_version,
+            focus_anchor_company_id=None,
+            focus_anchor_company_name=None,
+            baseline_company_id=None,
+            baseline_company_name=comparison.baseline_company_name,
+            summary=f"{workspace_label}: {status_message}",
+            top_insights=[],
+            urgent_signals=[],
+            coverage_health=[],
+            recommended_actions=[],
+            onboarding=[
+                OnboardingStepRead(
+                    id="scope_market",
+                    label="Scope market",
+                    description="Identify the relevant enterprise software sector.",
+                    status="done",
+                ),
+                OnboardingStepRead(
+                    id="discover_vendors",
+                    label="Discover vendors",
+                    description="Find the initial 5-7 companies defining the market.",
+                    status="active",
+                ),
+                OnboardingStepRead(
+                    id="hydrate_entities",
+                    label="Hydrate evidence",
+                    description="Scrape vendor sources and extract features, tools, and claims.",
+                    status="pending",
+                ),
+                OnboardingStepRead(
+                    id="calculate_gaps",
+                    label="Calculate gaps",
+                    description="Select the initial focus anchor and rank competitor gaps.",
+                    status="pending",
+                ),
+            ],
+            ask_suggestions=[],
+            totals={"companies": 0, "sources": 0, "features": 0, "tools": 0, "news": 0, "urgent_signals": 0},
+        )
     baseline = db.scalar(
         select(CompanyProfile)
-        .where(CompanyProfile.company_key == normalize_company_key(BASELINE_COMPANY_NAME))
+        .where(CompanyProfile.id == comparison.baseline_company_id)
         .options(
             selectinload(CompanyProfile.sources),
             selectinload(CompanyProfile.news_items),
             selectinload(CompanyProfile.claims),
         )
-    ) or _ensure_baseline_profile(db, scrape_missing_source=False)
+    )
+    if not baseline:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis target company not found")
+    baseline_name = _safe_company_name(baseline.company_name, baseline.primary_domain)
     companies = db.scalars(
         select(CompanyProfile)
         .options(
@@ -2023,7 +3245,8 @@ def _build_briefing(db: Session) -> BriefingRead:
         .order_by(CompanyProfile.source_count.desc(), CompanyProfile.company_name.asc())
     ).all()
     company_by_id = {company.id: company for company in companies}
-    competitors = [company for company in companies if company.id != baseline.id]
+    comparison_competitor_ids = {row.company_id for row in comparison.competitors}
+    competitors = [company for company in companies if company.id in comparison_competitor_ids]
 
     insights: list[BriefingInsightRead] = []
     for row in comparison.competitors[:8]:
@@ -2048,7 +3271,7 @@ def _build_briefing(db: Session) -> BriefingRead:
                     headline=f"{row.company_name} is creating pressure around {named_signals}",
                     summary=(
                         f"{row.company_name} shows {feature_count} differentiated features and {tool_count} "
-                        f"differentiated tools against the Concentric baseline."
+                        f"differentiated tools against the {baseline_name} baseline."
                     ),
                     competitor_id=row.company_id,
                     competitor_name=row.company_name,
@@ -2056,7 +3279,7 @@ def _build_briefing(db: Session) -> BriefingRead:
                     confidence=_clamp_confidence(0.58 + min(row.gap_score, 20) / 55 + min(claim_count, 6) * 0.025),
                     urgency=_urgency_from_impact(impact),
                     recommended_action=(
-                        f"Review Concentric positioning and roadmap coverage for {named_signals}; prepare a counter "
+                        f"Review {baseline_name} positioning and roadmap coverage for {named_signals}; prepare a counter "
                         f"message for deals where {row.company_name} appears."
                     ),
                     why_it_matters=(
@@ -2176,14 +3399,23 @@ def _build_briefing(db: Session) -> BriefingRead:
     )
 
     if not competitors:
-        summary = "Add three competitors to generate the first strategic briefing."
+        summary = f"Add three competitors around {baseline_name} to generate the first strategic briefing."
     elif top_insights:
-        summary = f"{len(top_insights)} priority insights are ready from {len(competitors)} tracked competitors."
+        summary = f"{len(top_insights)} priority insights are ready for {baseline_name} from {len(competitors)} tracked competitors."
     else:
-        summary = "Competitors are tracked, but more direct evidence is needed before strategy recommendations are useful."
+        summary = f"Competitors are tracked for {baseline_name}, but more direct evidence is needed before strategy recommendations are useful."
 
     return BriefingRead(
         date=_now(),
+        analysis_workspace_id=comparison.analysis_workspace_id,
+        analysis_workspace_name=comparison.analysis_workspace_name,
+        workspace_status=comparison.workspace_status,
+        workspace_status_message=comparison.workspace_status_message,
+        target_version=comparison.target_version,
+        focus_anchor_company_id=baseline.id,
+        focus_anchor_company_name=baseline_name,
+        baseline_company_id=baseline.id,
+        baseline_company_name=baseline_name,
         summary=summary,
         top_insights=top_insights,
         urgent_signals=urgent_signals,
@@ -2192,7 +3424,7 @@ def _build_briefing(db: Session) -> BriefingRead:
         onboarding=onboarding,
         ask_suggestions=[
             "What changed this week across my competitors?",
-            "Which competitor has the largest product gap against Concentric?",
+            f"Which competitor has the largest product gap against {baseline_name}?",
             "Which companies need better evidence coverage?",
             "Show evidence behind the top priority signal.",
         ],
@@ -2201,13 +3433,37 @@ def _build_briefing(db: Session) -> BriefingRead:
 
 
 @app.get("/briefing", response_model=BriefingRead)
-def get_briefing(db: Session = Depends(get_db)) -> BriefingRead:
-    return _build_briefing(db=db)
+def get_briefing(
+    analysis_workspace_id: int | None = Query(
+        default=None,
+        description="Analysis workspace id. When provided, the workspace company pool defines the analysis scope.",
+    ),
+    baseline_company_id: int | None = Query(
+        default=None,
+        description="Company profile id to use as the analysis target. Defaults to the Concentric AI baseline.",
+    ),
+    focus_anchor_company_id: int | None = Query(
+        default=None,
+        description="Company profile id to use as the focus anchor inside a workspace.",
+    ),
+    db: Session = Depends(get_db),
+) -> BriefingRead:
+    return _build_briefing(
+        db=db,
+        baseline_company_id=baseline_company_id,
+        analysis_workspace_id=analysis_workspace_id,
+        focus_anchor_company_id=focus_anchor_company_id,
+    )
 
 
 @app.post("/ai/ask", response_model=AskConcentricResponse)
 def ask_concentric_ai(request: AskConcentricRequest, db: Session = Depends(get_db)) -> AskConcentricResponse:
-    briefing = _build_briefing(db=db)
+    briefing = _build_briefing(
+        db=db,
+        baseline_company_id=request.baseline_company_id,
+        analysis_workspace_id=request.analysis_workspace_id,
+        focus_anchor_company_id=request.focus_anchor_company_id,
+    )
     question = request.question.strip().lower()
     insight_pool = list({insight.id: insight for insight in [*briefing.top_insights, *briefing.urgent_signals]}.values())
     selected: BriefingInsightRead | None = None
@@ -2258,10 +3514,28 @@ def ask_concentric_ai(request: AskConcentricRequest, db: Session = Depends(get_d
 
 @app.get("/comparison", response_model=ComparisonRead)
 def get_comparison(
+    analysis_workspace_id: int | None = Query(
+        default=None,
+        description="Analysis workspace id. When provided, the workspace company pool defines the analysis scope.",
+    ),
+    baseline_company_id: int | None = Query(
+        default=None,
+        description="Company profile id to use as the analysis target. Defaults to the Concentric AI baseline.",
+    ),
+    focus_anchor_company_id: int | None = Query(
+        default=None,
+        description="Company profile id to use as the focus anchor inside a workspace.",
+    ),
     refresh_baseline: bool = Query(
         default=False,
-        description="When true, refreshes Concentric baseline news before comparison. Default is read-only for API stability.",
+        description="When true, refreshes the selected analysis target before comparison. Default is read-only for API stability.",
     ),
     db: Session = Depends(get_db),
 ) -> ComparisonRead:
-    return _build_comparison(db=db, refresh_baseline=refresh_baseline)
+    return _build_comparison(
+        db=db,
+        analysis_workspace_id=analysis_workspace_id,
+        baseline_company_id=baseline_company_id,
+        focus_anchor_company_id=focus_anchor_company_id,
+        refresh_baseline=refresh_baseline,
+    )

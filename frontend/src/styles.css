@@ -738,7 +738,8 @@ a:hover {
   flex-wrap: wrap;
 }
 
-.theme-switcher {
+.theme-switcher,
+.analysis-target-switcher {
   display: inline-grid;
   grid-template-columns: auto minmax(130px, 1fr) auto;
   align-items: center;
@@ -754,7 +755,12 @@ a:hover {
   position: relative;
 }
 
-.theme-select {
+.analysis-target-switcher {
+  min-width: 230px;
+}
+
+.theme-select,
+.analysis-target-switcher select {
   width: 100%;
   min-height: 38px;
   appearance: none;
@@ -769,12 +775,14 @@ a:hover {
   padding: 0 22px 0 8px;
 }
 
-.theme-select:focus-visible {
+.theme-select:focus-visible,
+.analysis-target-switcher select:focus-visible {
   outline: 2px solid rgb(2 132 199 / 22%);
   outline-offset: 2px;
 }
 
-.theme-select option {
+.theme-select option,
+.analysis-target-switcher option {
   background: var(--surface-1);
   color: var(--ink-900);
 }
@@ -959,6 +967,295 @@ a:hover {
   );
   border-color: #9ec6df;
   color: #0f3149;
+}
+
+.analysis-scope-panel {
+  margin-top: 14px;
+  border: 1px solid var(--line-1);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, var(--surface-1), var(--surface-2)),
+    linear-gradient(110deg, rgb(79 70 229 / 8%), rgb(2 132 199 / 8%), rgb(20 184 166 / 7%));
+  box-shadow: var(--theme-glow);
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.analysis-scope-summary strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-900);
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  line-height: 1.25;
+}
+
+.analysis-scope-summary p {
+  margin: 4px 0 0;
+  max-width: 760px;
+  color: var(--ink-700);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.analysis-scope-status {
+  width: fit-content;
+  margin-top: 8px;
+  border: 1px solid var(--status-info-border);
+  border-radius: 999px;
+  background: var(--status-info-bg);
+  color: var(--status-info-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  font-size: 0.74rem;
+  font-weight: 750;
+}
+
+.analysis-scope-status.failed {
+  border-color: var(--status-danger-border);
+  background: var(--status-danger-bg);
+  color: var(--status-danger-text);
+}
+
+.analysis-scope-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.analysis-scope-controls select,
+.analysis-scope-editor select,
+.analysis-scope-editor input,
+.analysis-scope-editor textarea {
+  min-height: 34px;
+  border: 1px solid var(--line-0);
+  border-radius: 8px;
+  background: var(--surface-0);
+  color: var(--ink-900);
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.analysis-scope-controls select {
+  min-width: 180px;
+  max-width: 260px;
+  padding: 0 10px;
+}
+
+.analysis-scope-chip {
+  min-height: 34px;
+  border: 1px solid var(--line-1);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink-700);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.analysis-scope-chip svg {
+  color: var(--accent-cyan);
+}
+
+.analysis-scope-editor {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line-0);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface-0) 72%, transparent);
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.analysis-retarget-warning,
+.source-target-guard,
+.source-intake-notice {
+  border: 1px solid var(--status-info-border);
+  border-radius: 9px;
+  background: var(--status-info-bg);
+  color: var(--status-info-text);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 10px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.analysis-retarget-warning {
+  border-color: var(--status-warning-border);
+  background: var(--status-warning-bg);
+  color: var(--status-warning-text);
+}
+
+.analysis-retarget-warning svg,
+.source-target-guard svg,
+.source-intake-notice svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.analysis-retarget-warning strong,
+.analysis-retarget-warning span,
+.source-target-guard span,
+.source-intake-notice span {
+  display: block;
+}
+
+.analysis-retarget-warning strong {
+  margin-bottom: 2px;
+}
+
+.source-target-guard,
+.source-intake-notice {
+  margin-top: 10px;
+}
+
+.analysis-scope-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(200px, 0.8fr);
+  gap: 12px;
+}
+
+.analysis-scope-editor label {
+  display: grid;
+  gap: 6px;
+}
+
+.analysis-scope-full-field {
+  grid-column: 1 / -1;
+}
+
+.analysis-scope-editor label > span,
+.analysis-competitor-picker > div:first-child span {
+  color: var(--ink-700);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.analysis-scope-editor input,
+.analysis-scope-editor select,
+.analysis-scope-editor textarea {
+  width: 100%;
+  padding: 0 10px;
+}
+
+.analysis-scope-editor textarea {
+  min-height: 70px;
+  padding: 10px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.analysis-competitor-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.analysis-competitor-picker > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.analysis-competitor-picker strong {
+  color: var(--ink-900);
+  font-size: 0.86rem;
+}
+
+.analysis-competitor-grid {
+  max-height: 230px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+  padding-right: 2px;
+}
+
+.analysis-competitor-option {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--line-0);
+  border-radius: 8px;
+  background: var(--surface-1);
+  padding: 8px 9px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-800);
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.analysis-competitor-option:hover {
+  border-color: color-mix(in srgb, var(--accent-primary) 42%, var(--line-0));
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--surface-1));
+}
+
+.analysis-competitor-option.selected {
+  border-color: color-mix(in srgb, var(--accent-primary) 62%, var(--line-1));
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface-1));
+  color: var(--ink-900);
+}
+
+.analysis-competitor-check {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  border: 1px solid var(--line-1);
+  border-radius: 5px;
+  background: var(--surface-0);
+  color: var(--accent-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.analysis-competitor-check.selected {
+  border-color: color-mix(in srgb, var(--accent-primary) 65%, var(--line-1));
+  background: color-mix(in srgb, var(--accent-primary) 16%, var(--surface-0));
+}
+
+.analysis-competitor-option.selected .analysis-competitor-check {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 18%, var(--surface-0));
+}
+
+.analysis-competitor-empty {
+  grid-column: 1 / -1;
+  min-height: 54px;
+  border: 1px dashed var(--line-1);
+  border-radius: 8px;
+  color: var(--ink-700);
+  background: color-mix(in srgb, var(--surface-1) 62%, transparent);
+  display: flex;
+  align-items: center;
+  padding: 10px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.analysis-scope-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
 }
 
 .guide-launcher {
@@ -1277,7 +1574,11 @@ button:disabled {
 
 .status.running,
 .status.pending,
-.status.queued {
+.status.queued,
+.status.discovering_market,
+.status.hydrating_entities,
+.status.extracting_signals,
+.status.calculating_gaps {
   background: var(--status-info-bg);
   border-color: var(--status-info-border);
   color: var(--status-info-text);
@@ -2308,6 +2609,103 @@ button.company-card.active {
   margin-top: 3px;
   color: var(--ink-700);
   font-size: 0.82rem;
+}
+
+.autonomous-workspace-canvas {
+  min-height: 360px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 22px;
+  text-align: center;
+  padding: 44px 28px;
+}
+
+.autonomous-workspace-canvas h2 {
+  margin: 6px 0 8px;
+  color: var(--ink-900);
+  font-size: clamp(1.5rem, 2vw, 2.1rem);
+  letter-spacing: 0;
+}
+
+.autonomous-workspace-canvas p {
+  max-width: 640px;
+  margin: 0 auto;
+  color: var(--ink-700);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.autonomous-orbit {
+  width: 72px;
+  height: 72px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 45%, var(--line-0));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-primary) 12%, var(--surface-1));
+  color: var(--accent-primary);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.18);
+}
+
+.autonomous-step-grid {
+  width: min(760px, 100%);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.autonomous-step {
+  min-height: 92px;
+  border: 1px solid var(--line-0);
+  border-radius: 8px;
+  background: var(--surface-1);
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  gap: 8px;
+  padding: 12px 10px;
+}
+
+.autonomous-step > span {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-700);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.autonomous-step.active {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--line-0));
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--surface-1));
+}
+
+.autonomous-step.active > span,
+.autonomous-step.complete > span {
+  border-color: color-mix(in srgb, var(--accent-primary) 60%, var(--line-1));
+  color: var(--accent-primary);
+}
+
+.autonomous-step strong,
+.autonomous-step small {
+  display: block;
+}
+
+.autonomous-step strong {
+  color: var(--ink-900);
+  font-size: 0.82rem;
+}
+
+.autonomous-step small {
+  margin-top: 3px;
+  color: var(--ink-600);
+  font-size: 0.72rem;
+  line-height: 1.35;
 }
 
 .priority-list {
@@ -4359,6 +4757,7 @@ button.company-card,
 /* Final token application layer. Kept after legacy theme-specific rules so all
    ten themes share the same component contract. */
 :root[data-theme] .header,
+:root[data-theme] .analysis-scope-panel,
 :root[data-theme] .guide-launcher,
 :root[data-theme] .surface,
 :root[data-theme] .metric-card,
@@ -4374,8 +4773,15 @@ button.company-card,
 :root[data-theme] .recommendation-row,
 :root[data-theme] .tutorial-card,
 :root[data-theme] .tutorial-screenshot,
+:root[data-theme] .analysis-scope-editor,
+:root[data-theme] .analysis-competitor-option,
+:root[data-theme] .analysis-scope-chip,
+:root[data-theme] .analysis-retarget-warning,
+:root[data-theme] .source-target-guard,
+:root[data-theme] .source-intake-notice,
 :root[data-theme] .score-formula,
 :root[data-theme] .theme-switcher,
+:root[data-theme] .analysis-target-switcher,
 :root[data-theme] .tab-bar,
 :root[data-theme] .ask-answer,
 :root[data-theme] .analyst-note,
@@ -4388,7 +4794,10 @@ button.company-card,
 
 :root[data-theme] .header,
 :root[data-theme] .surface,
+:root[data-theme] .analysis-scope-panel,
+:root[data-theme] .analysis-scope-editor,
 :root[data-theme] .theme-switcher,
+:root[data-theme] .analysis-target-switcher,
 :root[data-theme] .tab-bar,
 :root[data-theme] .guide-launcher {
   -webkit-backdrop-filter: var(--theme-backdrop-filter);
@@ -4422,8 +4831,63 @@ button.company-card,
   color: var(--ink-900);
 }
 
+:root[data-theme] button.analysis-competitor-option {
+  border-color: var(--line-0);
+  background: var(--surface-1);
+  color: var(--ink-800);
+  box-shadow: none;
+}
+
+:root[data-theme] button.analysis-competitor-option:hover {
+  border-color: color-mix(in srgb, var(--accent-primary) 42%, var(--line-0));
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--surface-1));
+}
+
+:root[data-theme] button.analysis-competitor-option.selected {
+  border-color: color-mix(in srgb, var(--accent-primary) 62%, var(--line-1));
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface-1));
+  color: var(--ink-900);
+}
+
+:root[data-theme] .analysis-competitor-check {
+  border-color: var(--line-1);
+  background: var(--surface-0);
+  color: var(--accent-primary);
+}
+
+:root[data-theme] button.analysis-competitor-option.selected .analysis-competitor-check {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 18%, var(--surface-0));
+}
+
+:root[data-theme] .analysis-competitor-empty {
+  border-color: var(--line-1);
+  background: color-mix(in srgb, var(--surface-1) 62%, transparent);
+  color: var(--ink-700);
+}
+
+:root[data-theme] .analysis-retarget-warning {
+  border-color: var(--status-warning-border);
+  background: var(--status-warning-bg);
+  color: var(--status-warning-text);
+  box-shadow: none;
+}
+
+:root[data-theme] .source-target-guard,
+:root[data-theme] .source-intake-notice {
+  border-color: var(--status-info-border);
+  background: var(--status-info-bg);
+  color: var(--status-info-text);
+  box-shadow: none;
+}
+
 :root[data-theme] input,
 :root[data-theme] select,
+:root[data-theme] .analysis-target-switcher select,
+:root[data-theme] .analysis-scope-controls select,
+:root[data-theme] .analysis-scope-editor input,
+:root[data-theme] .analysis-scope-editor select,
+:root[data-theme] .analysis-scope-editor textarea,
 :root[data-theme] .ask-input-shell {
   border-color: var(--line-0);
   background: var(--surface-1);
@@ -4510,6 +4974,13 @@ button.company-card,
 
 :root[data-theme] .connector-card span,
 :root[data-theme] .connector-card small,
+:root[data-theme] .analysis-scope-summary p,
+:root[data-theme] .analysis-scope-chip,
+:root[data-theme] .analysis-scope-editor label > span,
+:root[data-theme] .analysis-competitor-picker > div:first-child span,
+:root[data-theme] .analysis-retarget-warning span,
+:root[data-theme] .source-target-guard,
+:root[data-theme] .source-intake-notice,
 :root[data-theme] .panel-head p,
 :root[data-theme] .muted,
 :root[data-theme] .section-subtitle,
@@ -4526,6 +4997,9 @@ button.company-card,
 
 :root[data-theme] .metric-grid strong,
 :root[data-theme] .connector-card strong,
+:root[data-theme] .analysis-scope-summary strong,
+:root[data-theme] .analysis-competitor-picker strong,
+:root[data-theme] .analysis-retarget-warning strong,
 :root[data-theme] button.company-card strong,
 :root[data-theme] .company-card-score,
 :root[data-theme] .decision-card h4,
@@ -4595,13 +5069,18 @@ button.company-card,
 :root[data-theme] .status.running,
 :root[data-theme] .status.pending,
 :root[data-theme] .status.queued,
-:root[data-theme] .status.observed {
+:root[data-theme] .status.observed,
+:root[data-theme] .status.discovering_market,
+:root[data-theme] .status.hydrating_entities,
+:root[data-theme] .status.extracting_signals,
+:root[data-theme] .status.calculating_gaps {
   background: var(--status-info-bg);
   border-color: var(--status-info-border);
   color: var(--status-info-text);
 }
 
 :root[data-theme="liquid"] .header,
+:root[data-theme="liquid"] .analysis-scope-panel,
 :root[data-theme="liquid"] .guide-launcher,
 :root[data-theme="liquid"] .surface,
 :root[data-theme="liquid"] .metric-card,
@@ -4617,7 +5096,14 @@ button.company-card,
 :root[data-theme="liquid"] .recommendation-row,
 :root[data-theme="liquid"] .tutorial-card,
 :root[data-theme="liquid"] .tutorial-screenshot,
+:root[data-theme="liquid"] .analysis-scope-editor,
+:root[data-theme="liquid"] .analysis-competitor-option,
+:root[data-theme="liquid"] .analysis-scope-chip,
+:root[data-theme="liquid"] .analysis-retarget-warning,
+:root[data-theme="liquid"] .source-target-guard,
+:root[data-theme="liquid"] .source-intake-notice,
 :root[data-theme="liquid"] .theme-switcher,
+:root[data-theme="liquid"] .analysis-target-switcher,
 :root[data-theme="liquid"] .tab-bar,
 :root[data-theme="liquid"] .score-formula {
   border-color: var(--line-1) !important;
@@ -4632,10 +5118,59 @@ button.company-card,
 :root[data-theme="liquid"] .icon-button,
 :root[data-theme="liquid"] input,
 :root[data-theme="liquid"] select,
+:root[data-theme="liquid"] .analysis-target-switcher select,
+:root[data-theme="liquid"] .analysis-scope-controls select,
+:root[data-theme="liquid"] .analysis-scope-editor input,
+:root[data-theme="liquid"] .analysis-scope-editor select,
+:root[data-theme="liquid"] .analysis-scope-editor textarea,
 :root[data-theme="liquid"] .ask-input-shell {
   border-color: var(--line-0) !important;
   background: linear-gradient(180deg, var(--surface-1), var(--surface-2)) !important;
   color: var(--ink-900) !important;
+}
+
+:root[data-theme="liquid"] button.analysis-competitor-option {
+  border-color: var(--line-0) !important;
+  background: var(--surface-1) !important;
+  color: var(--ink-800) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme="liquid"] button.analysis-competitor-option:hover {
+  border-color: color-mix(in srgb, var(--accent-primary) 42%, var(--line-0)) !important;
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--surface-1)) !important;
+}
+
+:root[data-theme="liquid"] button.analysis-competitor-option.selected {
+  border-color: color-mix(in srgb, var(--accent-primary) 62%, var(--line-1)) !important;
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--surface-1)) !important;
+  color: var(--ink-900) !important;
+}
+
+:root[data-theme="liquid"] .analysis-competitor-check {
+  border-color: var(--line-1) !important;
+  background: var(--surface-0) !important;
+  color: var(--accent-primary) !important;
+}
+
+:root[data-theme="liquid"] button.analysis-competitor-option.selected .analysis-competitor-check {
+  border-color: var(--accent-primary) !important;
+  background: color-mix(in srgb, var(--accent-primary) 18%, var(--surface-0)) !important;
+}
+
+:root[data-theme="liquid"] .analysis-retarget-warning {
+  border-color: var(--status-warning-border) !important;
+  background: var(--status-warning-bg) !important;
+  color: var(--status-warning-text) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme="liquid"] .source-target-guard,
+:root[data-theme="liquid"] .source-intake-notice {
+  border-color: var(--status-info-border) !important;
+  background: var(--status-info-bg) !important;
+  color: var(--status-info-text) !important;
+  box-shadow: none !important;
 }
 
 :root[data-theme="liquid"] .data-table th {
@@ -4691,7 +5226,11 @@ button.company-card,
 :root[data-theme="liquid"] .status.running,
 :root[data-theme="liquid"] .status.pending,
 :root[data-theme="liquid"] .status.queued,
-:root[data-theme="liquid"] .status.observed {
+:root[data-theme="liquid"] .status.observed,
+:root[data-theme="liquid"] .status.discovering_market,
+:root[data-theme="liquid"] .status.hydrating_entities,
+:root[data-theme="liquid"] .status.extracting_signals,
+:root[data-theme="liquid"] .status.calculating_gaps {
   background: var(--status-info-bg) !important;
   border-color: var(--status-info-border) !important;
   color: var(--status-info-text) !important;
@@ -4742,6 +5281,7 @@ button.company-card,
   }
 
   .briefing-action-grid,
+  .autonomous-step-grid,
   .priority-card-list.two-col,
   .tutorial-hero,
   .tutorial-card-split,
@@ -4769,6 +5309,26 @@ button.company-card,
     justify-content: flex-start;
   }
 
+  .analysis-scope-panel {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .analysis-scope-controls {
+    justify-content: flex-start;
+  }
+
+  .analysis-scope-controls select {
+    width: 100%;
+    max-width: none;
+  }
+
+  .analysis-scope-editor-grid,
+  .analysis-competitor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-competitor-picker > div:first-child,
   .guide-launcher {
     align-items: flex-start;
     flex-direction: column;

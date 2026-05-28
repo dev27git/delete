@@ -4,6 +4,8 @@ import base64
 
 import httpx
 
+from app import main
+from app.models import CompanySource
 from app.scraper import (
     _dedupe_feature_hits,
     _dedupe_tool_hits,
@@ -59,17 +61,91 @@ def test_workflow_automation_signals_are_detected() -> None:
     assert "Intellistack" in tools
 
 
+def test_semantic_data_governance_signals_are_detected() -> None:
+    text = (
+        "We automatically find and catalog sensitive records across your cloud storage. "
+        "Teams get a unified data layer for data stewardship, risk dashboards, and "
+        "audit-ready logs for GDPR/SOX compliance."
+    )
+
+    features = _feature_names(text)
+
+    assert "Sensitive Data Discovery" in features
+    assert "Data Classification" in features
+    assert "Data Fabric" in features
+    assert "Data Governance" in features
+    assert "Risk Analytics" in features
+    assert "Compliance Reporting" in features
+
+
+def test_target_application_tools_are_detected() -> None:
+    text = (
+        "Native deployment on AWS and Azure with Snowflake synchronization. "
+        "Supported integrations include Salesforce, Google Workspace, Microsoft 365, "
+        "Slack, ServiceNow, Jira, Confluence, and Okta."
+    )
+
+    tools = _tool_names(text)
+
+    assert {
+        "AWS",
+        "Azure",
+        "Snowflake",
+        "Salesforce",
+        "Google Workspace",
+        "Microsoft 365",
+        "Slack",
+        "ServiceNow",
+        "Jira",
+        "Confluence",
+        "Okta",
+    }.issubset(tools)
+
+
+def test_cookie_and_footer_noise_does_not_create_tool_signals() -> None:
+    text = (
+        "Cookie Policy: Google Analytics, WordPress, and Okta may process administrator telemetry. "
+        "Privacy Policy Terms of Use. All rights reserved."
+    )
+
+    assert _tool_names(text) == set()
+
+
 def test_url_and_domain_hints_cover_sparse_or_blocked_sources() -> None:
     opentext_text = "https://www.opentext.com/products/data-security Access Denied"
     rubrik_features = _domain_feature_hints("https://www.rubrik.com/")
     rubrik_tools = _domain_tool_hints("https://www.rubrik.com/")
+    opentext_features = _domain_feature_hints("https://www.opentext.com/")
+    tenable_features = _domain_feature_hints("https://www.tenable.com/")
+    tenable_tools = _domain_tool_hints("https://www.tenable.com/")
 
-    features = _dedupe_feature_hits([*_extract_features(opentext_text), *rubrik_features])
-    tools = _dedupe_tool_hits([*_extract_tools(opentext_text), *rubrik_tools])
+    features = _dedupe_feature_hits([*_extract_features(opentext_text), *rubrik_features, *opentext_features, *tenable_features])
+    tools = _dedupe_tool_hits([*_extract_tools(opentext_text), *rubrik_tools, *tenable_tools])
 
     assert "Data Security" in {item.name for item in features}
     assert "Cyber Resilience" in {item.name for item in features}
+    assert "Exposure Management" in {item.name for item in features}
     assert "Rubrik Security Cloud" in {item.name for item in tools}
+    assert "Tenable One" in {item.name for item in tools}
+
+
+def test_source_signal_fallback_populates_sparse_source_rows() -> None:
+    source = CompanySource(
+        source_url="https://www.tenable.com/",
+        source_domain="www.tenable.com",
+        source_type="website",
+        detected_company_name="Tenable",
+        extracted_features_json="[]",
+        extracted_tools_json="[]",
+        confidence=0.2,
+    )
+
+    features = {item.name for item in main._source_features(source)}
+    tools = {item.name for item in main._source_tools(source)}
+
+    assert "Exposure Management" in features
+    assert "Vulnerability Management" in features
+    assert "Tenable One" in tools
 
 
 def _encoded_google_news_url(payload: bytes) -> str:
