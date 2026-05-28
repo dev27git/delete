@@ -49,12 +49,16 @@ const VIEWS = [
 ];
 
 const THEME_OPTIONS = [
-  { id: "light", label: "Light", icon: Sun },
-  { id: "dark", label: "Dark", icon: Moon },
+  { id: "dark", label: "Midnight Slate", icon: Moon },
+  { id: "light", label: "Clean Editorial", icon: Sun },
   { id: "liquid", label: "Liquid Glass", icon: Droplets },
   { id: "frosted", label: "Frosted Glass", icon: Snowflake },
-  { id: "warm-frosted", label: "Warm Frosted", icon: Sun },
   { id: "heritage", label: "Heritage", icon: Sparkles },
+  { id: "nordic-cold", label: "Nordic Cold", icon: Snowflake },
+  { id: "cyber-security", label: "Cyber Security", icon: ShieldCheck },
+  { id: "solarized-calm", label: "Solarized Calm", icon: Sun },
+  { id: "dracula-obsidian", label: "Dracula Obsidian", icon: Sparkles },
+  { id: "emerald-slate", label: "Emerald Slate", icon: Radar },
 ];
 
 const METRIC_WIDGETS = [
@@ -575,6 +579,179 @@ function AskConcentricPanel({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function TutorialScreenshot({ label }) {
+  return (
+    <div className="tutorial-screenshot" aria-label={label}>
+      <div className="tutorial-screenshot-bar">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="tutorial-screenshot-body">
+        <Sparkles size={18} />
+        <strong>{label}</strong>
+        <span>Screenshot placeholder</span>
+      </div>
+    </div>
+  );
+}
+
+function TutorialPage({ onNavigate }) {
+  return (
+    <main className="tutorial-page">
+      <section className="surface tutorial-hero">
+        <div>
+          <span className="section-kicker">Mastering competitive intelligence</span>
+          <h2>Spot competitor gaps without drowning in raw market data</h2>
+          <p>
+            Use this workflow to move from source intake to verified company profiles to a gap view that product,
+            sales, and security teams can act on every week.
+          </p>
+        </div>
+        <div className="tutorial-hero-panel">
+          <strong>Weekly loop</strong>
+          <span>Paste sources</span>
+          <span>Verify claims</span>
+          <span>Prioritize gaps</span>
+        </div>
+      </section>
+
+      <section className="tutorial-grid">
+        <article className="surface tutorial-card">
+          <span className="tutorial-step">01</span>
+          <h3>The CI nightmare solved</h3>
+          <p>
+            Traditional CI work usually means manual scraping, brittle spreadsheets, duplicate company records, and
+            noisy news feeds. The Control Center centralizes that work into one evidence graph.
+          </p>
+          <ul>
+            <li>Auto-resolves company entities from pasted URLs.</li>
+            <li>Extracts feature and tool signals from product, docs, blog, and news sources.</li>
+            <li>Highlights market updates and competitor gaps against Concentric AI.</li>
+          </ul>
+          <div className="tutorial-callout">
+            <strong>Outcome</strong>
+            <span>Less manual research, more defensible strategy work.</span>
+          </div>
+        </article>
+
+        <article className="surface tutorial-card wide">
+          <span className="tutorial-step">02</span>
+          <div className="tutorial-card-split">
+            <div>
+              <h3>Feed the insights engine</h3>
+              <p>
+                Open <strong>Sources</strong> and paste competitor news, blogs, product pages, or documentation into
+                the intake field. Click <strong>Add and Analyze</strong> to scrape the page and merge it into the right
+                company profile.
+              </p>
+              <ul>
+                <li>
+                  Use <strong>Add and Analyze</strong> for targeted sources you already trust.
+                </li>
+                <li>
+                  Use <strong>Auto Discover Competitors</strong> to seed the workspace with relevant market players.
+                </li>
+                <li>
+                  Read the ledger columns for URL, company, type, extracted features, detected tools, status, and last
+                  scrape time.
+                </li>
+              </ul>
+              <div className="tutorial-callout pro">
+                <strong>Pro-Tip</strong>
+                <span>
+                  Pasting a source once replaces manual web-scraping. The app stores the evidence trail and makes it
+                  available for refresh, comparison, and claims verification.
+                </span>
+              </div>
+            </div>
+            <TutorialScreenshot label="Source Intake UI: URL input, Add and Analyze, Auto Discover, source ledger" />
+          </div>
+        </article>
+
+        <article className="surface tutorial-card wide">
+          <span className="tutorial-step">03</span>
+          <div className="tutorial-card-split reverse">
+            <TutorialScreenshot label="Company Intelligence UI: entity list, confidence panels, evidence-backed claims" />
+            <div>
+              <h3>Profile deep dives</h3>
+              <p>
+                Open <strong>Competitors</strong> to inspect company profiles. The left rail lists company entities
+                such as Rubrik, BigID, Cyberhaven, OpenText, and Tenable. The right pane shows the diagnostic view.
+              </p>
+              <ul>
+                <li>
+                  <strong>Why This Company Is Grouped</strong> explains entity resolution and duplicate handling.
+                </li>
+                <li>
+                  <strong>Claim Confidence Decision</strong> shows how extraction quality, source tier, freshness, and
+                  corroboration affect trust.
+                </li>
+                <li>
+                  <strong>Market Signal Selection</strong> shows which news, LinkedIn, and enrichment channels support
+                  the profile.
+                </li>
+                <li>
+                  <strong>Evidence-Backed Claims</strong> is the clean fact-checking panel for product and sales teams.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article className="surface tutorial-card wide">
+          <span className="tutorial-step">04</span>
+          <div className="tutorial-card-split">
+            <div>
+              <h3>Reveal the edge in the gap view</h3>
+              <p>
+                Open <strong>Gaps</strong> to compare competitor capabilities against Concentric AI. This is where raw
+                evidence becomes roadmap and battlecard direction.
+              </p>
+              <ul>
+                <li>
+                  <strong>Gap Score</strong> ranks visible competitor pressure using feature, tool, and market signal
+                  evidence.
+                </li>
+                <li>
+                  <strong>Features Concentric Lacks</strong> highlights capabilities such as Insider Risk Detection,
+                  Policy Automation, Compliance Reporting, or Data Governance.
+                </li>
+                <li>
+                  <strong>Latest Market Signals</strong> surfaces recent evidence that may indicate launches,
+                  campaigns, partnerships, or messaging shifts.
+                </li>
+              </ul>
+              <div className="tutorial-callout">
+                <strong>Use it immediately</strong>
+                <span>
+                  Convert high-score gaps into roadmap review items, sales battlecard counters, or messaging updates.
+                </span>
+              </div>
+            </div>
+            <TutorialScreenshot label="Concentric Gap View UI: competitor matrix, gap score, feature gaps, market signals" />
+          </div>
+        </article>
+      </section>
+
+      <section className="surface tutorial-cta">
+        <div>
+          <span className="section-kicker">Next action</span>
+          <h3>Run the loop this week</h3>
+          <p>
+            Open <strong>Sources</strong>, paste three competitor blogs or product pages, then move to <strong>Gaps</strong>{" "}
+            to reveal your first gap score.
+          </p>
+        </div>
+        <button type="button" className="icon-button" onClick={() => onNavigate("sources")}>
+          <ArrowUpRight size={15} />
+          Open Sources
+        </button>
+      </section>
+    </main>
   );
 }
 
@@ -1206,6 +1383,22 @@ function App() {
         </div>
       </header>
 
+      <section className={`guide-launcher ${activeView === "guide" ? "active" : ""}`}>
+        <div>
+          <span className="section-kicker">Learning Center</span>
+          <strong>Master the competitive intelligence workflow</strong>
+          <p>Use the guide to learn the weekly loop: feed sources, verify company intelligence, and reveal gaps.</p>
+        </div>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={() => setActiveView(activeView === "guide" ? "briefing" : "guide")}
+        >
+          <ClipboardList size={15} />
+          {activeView === "guide" ? "Back to Briefing" : "Open Guide"}
+        </button>
+      </section>
+
       <nav className="tab-bar">
         {VIEWS.map((view) => {
           const ViewIcon = view.icon;
@@ -1225,6 +1418,8 @@ function App() {
 
       {error ? <p className="error-banner">{error}</p> : null}
       {loading ? <p className="loading-banner">Loading intelligence graph...</p> : null}
+
+      {activeView === "guide" ? <TutorialPage onNavigate={setActiveView} /> : null}
 
       {activeView === "briefing" ? (
         <main className="briefing-workspace">
