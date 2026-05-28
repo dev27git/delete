@@ -18,6 +18,8 @@ async function request(path, { method = "GET", body } = {}) {
 }
 
 export const api = {
+  getBriefing: () => request("/briefing"),
+  askConcentric: (body) => request("/ai/ask", { method: "POST", body }),
   getDecisionPolicy: () => request("/decision-policy"),
   listEnrichmentConnectors: () => request("/enrichment-connectors"),
   autoDiscoverCompetitors: ({ maxCandidates = 30, includeNews = true, refreshMarketSignals = false } = {}) =>

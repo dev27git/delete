@@ -187,3 +187,84 @@ class ComparisonRead(BaseModel):
     baseline_features: list[FeatureSignal]
     baseline_tools: list[ToolSignal]
     competitors: list[CompetitorComparisonRead]
+
+
+class BriefingEvidenceRead(BaseModel):
+    id: int
+    source_type: str
+    title: str
+    url: str
+    publisher: str | None = None
+    company_id: int
+    company_name: str
+    published_at: datetime | None = None
+    relevance_score: float
+
+
+class BriefingInsightRead(BaseModel):
+    id: str
+    insight_type: str
+    headline: str
+    summary: str
+    competitor_id: int | None = None
+    competitor_name: str | None = None
+    impact: str
+    confidence: float
+    urgency: str
+    recommended_action: str
+    why_it_matters: str
+    evidence: list[BriefingEvidenceRead]
+
+
+class CoverageHealthRead(BaseModel):
+    company_id: int
+    company_name: str
+    coverage_score: int
+    status: str
+    source_count: int
+    news_count: int
+    connector_count: int
+    high_confidence_claim_count: int
+    missing_sources: list[str]
+    note: str
+
+
+class OnboardingStepRead(BaseModel):
+    id: str
+    label: str
+    description: str
+    status: str
+
+
+class BriefingRecommendationRead(BaseModel):
+    id: str
+    recommendation_type: str
+    action: str
+    urgency: str
+    impact: str
+    linked_insight_ids: list[str]
+    owner_role: str
+
+
+class BriefingRead(BaseModel):
+    date: datetime
+    summary: str
+    top_insights: list[BriefingInsightRead]
+    urgent_signals: list[BriefingInsightRead]
+    coverage_health: list[CoverageHealthRead]
+    recommended_actions: list[BriefingRecommendationRead]
+    onboarding: list[OnboardingStepRead]
+    ask_suggestions: list[str]
+    totals: dict[str, int]
+
+
+class AskConcentricRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=600)
+
+
+class AskConcentricResponse(BaseModel):
+    answer: str
+    why_it_matters: str
+    evidence: list[BriefingEvidenceRead]
+    recommended_next_step: str
+    confidence: float

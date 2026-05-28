@@ -142,6 +142,20 @@ def test_entity_merge_news_and_comparison(client, monkeypatch) -> None:
     lakera_row = next(row for row in comparison_payload["competitors"] if row["company_name"] == "Lakera")
     assert lakera_row["linkedin_url"]
 
+    briefing = client.get("/briefing")
+    assert briefing.status_code == 200
+    briefing_payload = briefing.json()
+    assert briefing_payload["top_insights"]
+    assert briefing_payload["recommended_actions"]
+    assert any(step["id"] == "generate_briefing" for step in briefing_payload["onboarding"])
+    assert briefing_payload["top_insights"][0]["evidence"]
+
+    ask = client.post("/ai/ask", json={"question": "Which competitor has the biggest product gap?"})
+    assert ask.status_code == 200
+    ask_payload = ask.json()
+    assert ask_payload["answer"]
+    assert ask_payload["recommended_next_step"]
+
 
 def test_market_signal_ingestion_filters_irrelevant_linkedin_posts(client, monkeypatch) -> None:
     def fake_scrape(_: str) -> ScrapeResult:

@@ -2,16 +2,22 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   Activity,
+  AlertTriangle,
   BarChart3,
+  Bot,
   Building2,
   ChevronDown,
   Check,
+  CheckCircle2,
+  ClipboardList,
   Database,
+  Eye,
   Gauge,
   Globe,
   Layers3,
   Link2,
   Linkedin,
+  MessageCircle,
   Radar,
   Loader2,
   Moon,
@@ -34,9 +40,11 @@ import {
 import { API_BASE_URL, api } from "./api";
 
 const VIEWS = [
-  { id: "sources", label: "Source Intake", icon: Plus },
-  { id: "companies", label: "Company Intelligence", icon: Building2 },
-  { id: "comparison", label: "Concentric Gap View", icon: Target },
+  { id: "briefing", label: "Briefing", icon: Sparkles },
+  { id: "companies", label: "Competitors", icon: Building2 },
+  { id: "signals", label: "Signals", icon: Radar },
+  { id: "comparison", label: "Gaps", icon: Target },
+  { id: "sources", label: "Sources", icon: Link2 },
   { id: "ops", label: "Ops Console", icon: Activity },
 ];
 
@@ -228,6 +236,40 @@ function pluralize(count, singular, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
+function percent(value) {
+  return `${Math.round(Number(value || 0) * 100)}%`;
+}
+
+function impactLabel(value) {
+  if (value === "high") return "High impact";
+  if (value === "medium") return "Medium impact";
+  return "Low impact";
+}
+
+function urgencyLabel(value) {
+  if (value === "this_week") return "This week";
+  if (value === "low_priority") return "Low priority";
+  return "Monitor";
+}
+
+function onboardingStatusLabel(value) {
+  if (value === "complete") return "Complete";
+  if (value === "in_progress") return "In progress";
+  return "Pending";
+}
+
+function onboardingStatusIcon(value) {
+  if (value === "complete") return CheckCircle2;
+  if (value === "in_progress") return Loader2;
+  return ClipboardList;
+}
+
+function coverageStatusLabel(value) {
+  if (value === "healthy") return "Healthy";
+  if (value === "needs_attention") return "Needs attention";
+  return "Thin coverage";
+}
+
 function SignalPills({ items }) {
   if (!items || items.length === 0) return <span className="muted">-</span>;
   return (
@@ -326,8 +368,218 @@ function ExpandableCellText({ text, maxChars = 170 }) {
   );
 }
 
+function InsightCard({ insight, connectorNames, onOpenCompany }) {
+  return (
+    <article className={`priority-card impact-${insight.impact || "low"}`}>
+      <div className="priority-card-main">
+        <div>
+          <div className="priority-card-meta">
+            <span>{titleCase(insight.insight_type || "signal")}</span>
+            <span>{impactLabel(insight.impact)}</span>
+            <span>{percent(insight.confidence)} confidence</span>
+            <span>{urgencyLabel(insight.urgency)}</span>
+          </div>
+          <h3>{insight.headline}</h3>
+          <p>{insight.summary}</p>
+        </div>
+        {insight.competitor_id ? (
+          <button type="button" className="icon-button compact" onClick={() => onOpenCompany(insight.competitor_id)}>
+            <Eye size={14} />
+            Evidence
+          </button>
+        ) : null}
+      </div>
+      <div className="analyst-note">
+        <strong>Recommended action</strong>
+        <span>{insight.recommended_action}</span>
+      </div>
+      {insight.evidence?.length ? (
+        <div className="evidence-strip">
+          {insight.evidence.slice(0, 3).map((item) => (
+            <a key={`${insight.id}-${item.source_type}-${item.id}`} href={item.url} target="_blank" rel="noreferrer">
+              <span>{sourceLabel(item.source_type, connectorNames)}</span>
+              <strong>{compactText(item.title, 92)}</strong>
+            </a>
+          ))}
+        </div>
+      ) : (
+        <span className="muted">No direct evidence attached yet.</span>
+      )}
+    </article>
+  );
+}
+
+function OnboardingChecklist({ steps }) {
+  if (!steps?.length) return null;
+  return (
+    <section className="surface onboarding-panel">
+      <div className="panel-title-row">
+        <div>
+          <span className="section-kicker">First run setup</span>
+          <h2>Progressive Onboarding</h2>
+        </div>
+        <ClipboardList size={18} />
+      </div>
+      <div className="onboarding-list">
+        {steps.map((step) => {
+          const StatusIcon = onboardingStatusIcon(step.status);
+          return (
+            <div key={step.id} className={`onboarding-step ${step.status}`}>
+              <span className="onboarding-step-icon">
+                <StatusIcon size={15} className={step.status === "in_progress" ? "spin-soft" : ""} />
+              </span>
+              <div>
+                <strong>{step.label}</strong>
+                <span>{step.description}</span>
+              </div>
+              <em>{onboardingStatusLabel(step.status)}</em>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function QuickStartWizard({
+  rows,
+  onChange,
+  onSubmit,
+  pending,
+  competitorCount,
+}) {
+  return (
+    <section className="surface quickstart-panel">
+      <div className="panel-title-row">
+        <div>
+          <span className="section-kicker">Quick start</span>
+          <h2>Which 3 competitors should Concentric monitor?</h2>
+          <p>Add direct company, product, docs, or news URLs. The system will extract entities and generate the first briefing.</p>
+        </div>
+        <Target size={18} />
+      </div>
+      <form className="quickstart-form" onSubmit={onSubmit}>
+        {rows.map((row, index) => (
+          <div key={`quickstart-${index}`} className="quickstart-row">
+            <span>{index + 1}</span>
+            <input
+              value={row.name}
+              onChange={(event) => onChange(index, "name", event.target.value)}
+              placeholder="Competitor name"
+            />
+            <input
+              value={row.url}
+              onChange={(event) => onChange(index, "url", event.target.value)}
+              placeholder="https://competitor.com"
+            />
+          </div>
+        ))}
+        <div className="quickstart-actions">
+          <span>{competitorCount} competitors tracked today</span>
+          <button type="submit" disabled={pending}>
+            {pending ? <Loader2 size={16} className="spin" /> : <Plus size={16} />}
+            Generate Briefing
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function CoverageHealthPanel({ coverage }) {
+  if (!coverage?.length) return null;
+  return (
+    <section className="surface coverage-panel">
+      <div className="panel-title-row">
+        <div>
+          <span className="section-kicker">Trust layer</span>
+          <h2>Coverage Health</h2>
+        </div>
+        <ShieldCheck size={18} />
+      </div>
+      <div className="coverage-list">
+        {coverage.slice(0, 6).map((item) => (
+          <article key={item.company_id} className={`coverage-row ${item.status}`}>
+            <div>
+              <strong>{item.company_name}</strong>
+              <span>{item.note}</span>
+              {item.missing_sources?.length ? (
+                <small>Missing: {item.missing_sources.slice(0, 3).join(", ")}</small>
+              ) : null}
+            </div>
+            <div className="coverage-score">
+              <strong>{item.coverage_score}</strong>
+              <span>{coverageStatusLabel(item.status)}</span>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AskConcentricPanel({
+  suggestions,
+  question,
+  answer,
+  pending,
+  onQuestionChange,
+  onAsk,
+  onUseSuggestion,
+}) {
+  return (
+    <section className="surface ask-panel">
+      <div className="panel-title-row">
+        <div>
+          <span className="section-kicker">Analyst layer</span>
+          <h2>Ask Concentric AI</h2>
+        </div>
+        <Bot size={18} />
+      </div>
+      <form className="ask-form" onSubmit={onAsk}>
+        <div className="ask-input-shell">
+          <MessageCircle size={16} />
+          <input
+            value={question}
+            onChange={(event) => onQuestionChange(event.target.value)}
+            placeholder="Ask about competitor moves, gaps, evidence, or source coverage"
+          />
+        </div>
+        <button type="submit" disabled={pending || question.trim().length < 3}>
+          {pending ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
+          Ask
+        </button>
+      </form>
+      <div className="ask-suggestions">
+        {(suggestions || []).slice(0, 4).map((item) => (
+          <button key={item} type="button" onClick={() => onUseSuggestion(item)}>
+            {item}
+          </button>
+        ))}
+      </div>
+      {answer ? (
+        <div className="ask-answer">
+          <strong>{answer.answer}</strong>
+          <span>{answer.why_it_matters}</span>
+          <p>{answer.recommended_next_step}</p>
+          {answer.evidence?.length ? (
+            <div className="evidence-strip">
+              {answer.evidence.slice(0, 3).map((item) => (
+                <a key={`ask-${item.source_type}-${item.id}`} href={item.url} target="_blank" rel="noreferrer">
+                  <span>{titleCase(item.source_type)}</span>
+                  <strong>{compactText(item.title, 90)}</strong>
+                </a>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function App() {
-  const [activeView, setActiveView] = useState("sources");
+  const [activeView, setActiveView] = useState("briefing");
   const [urlInput, setUrlInput] = useState("");
   const [sources, setSources] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -335,11 +587,19 @@ function App() {
   const [mergeReviews, setMergeReviews] = useState([]);
   const [ingestionJobs, setIngestionJobs] = useState([]);
   const [comparison, setComparison] = useState(null);
+  const [briefing, setBriefing] = useState(null);
   const [selectedCompanyId, setSelectedCompanyId] = useState(null);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [themeMode, setThemeMode] = useState("dark");
   const [companyQuery, setCompanyQuery] = useState("");
   const [sourceQuery, setSourceQuery] = useState("");
+  const [askQuestion, setAskQuestion] = useState("");
+  const [askAnswer, setAskAnswer] = useState(null);
+  const [quickStartRows, setQuickStartRows] = useState([
+    { name: "", url: "" },
+    { name: "", url: "" },
+    { name: "", url: "" },
+  ]);
   const [decisionPolicy, setDecisionPolicy] = useState(null);
   const [autoDiscoverResult, setAutoDiscoverResult] = useState(null);
   const [opsLoaded, setOpsLoaded] = useState(false);
@@ -354,6 +614,8 @@ function App() {
     companyEnrichmentId: null,
     mergeReviewId: null,
     runCycle: false,
+    quickStart: false,
+    ask: false,
   });
 
   const resolveSelectedCompanyId = (currentId, nextCompanies) => {
@@ -385,6 +647,25 @@ function App() {
       return { selectedCompanyId: nextSelectedCompanyId };
     } catch (err) {
       setError(err.message || "Failed to load data.");
+      return null;
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
+  };
+
+  const loadBriefing = async ({ showLoading = true } = {}) => {
+    if (showLoading) {
+      setLoading(true);
+    }
+    setError("");
+    try {
+      const nextBriefing = await api.getBriefing();
+      setBriefing(nextBriefing);
+      return nextBriefing;
+    } catch (err) {
+      setError(err.message || "Failed to load briefing.");
       return null;
     } finally {
       if (showLoading) {
@@ -459,6 +740,9 @@ function App() {
   };
 
   const refreshActiveViewData = async (companyId = selectedCompanyId, { showLoading = false } = {}) => {
+    if (activeView === "briefing" || activeView === "signals") {
+      return loadBriefing({ showLoading });
+    }
     if (activeView === "companies") {
       return loadCompanyDetail(companyId, { showLoading });
     }
@@ -475,7 +759,12 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const overview = await loadOverview({ showLoading: false });
+      const [overview] = await Promise.all([
+        loadOverview({ showLoading: false }),
+        activeView === "briefing" || activeView === "signals"
+          ? Promise.resolve(null)
+          : loadBriefing({ showLoading: false }),
+      ]);
       await refreshActiveViewData(overview?.selectedCompanyId ?? selectedCompanyId, {
         showLoading: false,
       });
@@ -503,6 +792,7 @@ function App() {
 
   useEffect(() => {
     loadOverview();
+    loadBriefing();
   }, []);
 
   useEffect(() => {
@@ -519,13 +809,16 @@ function App() {
   }, [activeView, selectedCompanyId, companies]);
 
   useEffect(() => {
+    if ((activeView === "briefing" || activeView === "signals") && !briefing) {
+      loadBriefing();
+    }
     if (activeView === "comparison" && !comparison) {
       loadComparison();
     }
     if (activeView === "ops" && !opsLoaded) {
       loadOps();
     }
-  }, [activeView, comparison, opsLoaded]);
+  }, [activeView, briefing, comparison, opsLoaded]);
 
   const totals = useMemo(() => {
     const featureTotal = companies.reduce((sum, company) => sum + company.features.length, 0);
@@ -671,6 +964,68 @@ function App() {
     [themeMode],
   );
   const SelectedThemeIcon = selectedTheme.icon;
+  const briefingInsights = briefing?.top_insights || [];
+  const urgentSignals = briefing?.urgent_signals || [];
+  const shouldShowQuickStart =
+    (briefing?.totals?.companies || companies.filter((company) => company.company_name !== "Concentric AI").length) < 3;
+
+  const openCompanyFromInsight = async (companyId) => {
+    setSelectedCompanyId(companyId);
+    setActiveView("companies");
+    await loadCompanyDetail(companyId, { showLoading: true });
+  };
+
+  const updateQuickStartRow = (index, field, value) => {
+    setQuickStartRows((current) =>
+      current.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)),
+    );
+  };
+
+  const submitQuickStart = async (event) => {
+    event.preventDefault();
+    const rowsToAdd = quickStartRows
+      .map((row) => ({ ...row, url: row.url.trim(), name: row.name.trim() }))
+      .filter((row) => row.url);
+    if (rowsToAdd.length === 0) {
+      setError("Add at least one competitor URL to generate a briefing.");
+      return;
+    }
+
+    setError("");
+    setPending((prev) => ({ ...prev, quickStart: true }));
+    try {
+      for (const row of rowsToAdd) {
+        await api.addSource({ url: row.url });
+      }
+      setQuickStartRows([
+        { name: "", url: "" },
+        { name: "", url: "" },
+        { name: "", url: "" },
+      ]);
+      setComparison(null);
+      setOpsLoaded(false);
+      await refreshCurrentView();
+    } catch (err) {
+      setError(err.message || "Failed to add competitor sources.");
+    } finally {
+      setPending((prev) => ({ ...prev, quickStart: false }));
+    }
+  };
+
+  const askConcentric = async (event) => {
+    event.preventDefault();
+    if (askQuestion.trim().length < 3) return;
+    setError("");
+    setPending((prev) => ({ ...prev, ask: true }));
+    try {
+      const response = await api.askConcentric({ question: askQuestion.trim() });
+      setAskAnswer(response);
+    } catch (err) {
+      setError(err.message || "Failed to ask Concentric AI.");
+    } finally {
+      setPending((prev) => ({ ...prev, ask: false }));
+    }
+  };
 
   const addSource = async (event) => {
     event.preventDefault();
@@ -822,8 +1177,8 @@ function App() {
           <span className="hero-kicker">Concentric AI</span>
           <h1>Concentric Competitive Intelligence Control Center</h1>
           <p>
-            Add any source URL. The system resolves company entities, merges records, extracts
-            feature/tool signals, and pulls market news for comparison against Concentric AI.
+            Start with today's strategic briefing, then drill into competitor evidence only when
+            a signal needs validation.
           </p>
         </div>
         <div className="header-actions">
@@ -851,23 +1206,6 @@ function App() {
         </div>
       </header>
 
-      <section className="metric-grid">
-        {METRIC_WIDGETS.map((metric) => {
-          const MetricIcon = metric.icon;
-          return (
-            <div className="metric-card" key={metric.key}>
-              <div className="metric-card-head">
-                <span className="metric-icon" aria-hidden="true">
-                  <MetricIcon size={14} />
-                </span>
-                <span>{metric.label}</span>
-              </div>
-              <strong>{totals[metric.key]}</strong>
-            </div>
-          );
-        })}
-      </section>
-
       <nav className="tab-bar">
         {VIEWS.map((view) => {
           const ViewIcon = view.icon;
@@ -887,6 +1225,177 @@ function App() {
 
       {error ? <p className="error-banner">{error}</p> : null}
       {loading ? <p className="loading-banner">Loading intelligence graph...</p> : null}
+
+      {activeView === "briefing" ? (
+        <main className="briefing-workspace">
+          <section className="surface priority-briefing">
+            <div className="briefing-head">
+              <div>
+                <span className="section-kicker">Daily intelligence briefing</span>
+                <h2>What should I focus on today?</h2>
+                <p>{briefing?.summary || "Loading today's briefing from your competitor graph."}</p>
+              </div>
+              <div className="briefing-date">
+                <span>{formatDate(briefing?.date)}</span>
+                <strong>{urgentSignals.length}</strong>
+                <small>priority signals</small>
+              </div>
+            </div>
+
+            {briefingInsights.length === 0 ? (
+              <div className="empty-briefing">
+                <Sparkles size={18} />
+                <div>
+                  <strong>Your first briefing is waiting for competitor evidence.</strong>
+                  <span>Add competitor URLs below. Concentric will turn the first scrape into prioritized signals.</span>
+                </div>
+              </div>
+            ) : (
+              <div className="priority-list">
+                {briefingInsights.slice(0, 3).map((insight, index) => (
+                  <div key={insight.id} className={`priority-bullet impact-${insight.impact || "low"}`}>
+                    <span>{index + 1}</span>
+                    <div>
+                      <strong>{insight.headline}</strong>
+                      <p>{insight.summary}</p>
+                      <small>
+                        {impactLabel(insight.impact)} • {percent(insight.confidence)} confidence •{" "}
+                        {urgencyLabel(insight.urgency)}
+                      </small>
+                    </div>
+                    {insight.competitor_id ? (
+                      <button type="button" className="icon-button ghost text" onClick={() => openCompanyFromInsight(insight.competitor_id)}>
+                        <Eye size={14} />
+                        Evidence
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className={`briefing-action-grid ${shouldShowQuickStart ? "" : "single"}`}>
+            {shouldShowQuickStart ? (
+              <QuickStartWizard
+                rows={quickStartRows}
+                onChange={updateQuickStartRow}
+                onSubmit={submitQuickStart}
+                pending={pending.quickStart}
+                competitorCount={briefing?.totals?.companies || 0}
+              />
+            ) : null}
+            <OnboardingChecklist steps={briefing?.onboarding || []} />
+          </section>
+
+          <AskConcentricPanel
+            suggestions={briefing?.ask_suggestions || []}
+            question={askQuestion}
+            answer={askAnswer}
+            pending={pending.ask}
+            onQuestionChange={setAskQuestion}
+            onAsk={askConcentric}
+            onUseSuggestion={(suggestion) => {
+              setAskQuestion(suggestion);
+              setAskAnswer(null);
+            }}
+          />
+
+          <section className="metric-grid briefing-metrics">
+            {METRIC_WIDGETS.map((metric) => {
+              const MetricIcon = metric.icon;
+              return (
+                <div className="metric-card" key={metric.key}>
+                  <div className="metric-card-head">
+                    <span className="metric-icon" aria-hidden="true">
+                      <MetricIcon size={14} />
+                    </span>
+                    <span>{metric.label}</span>
+                  </div>
+                  <strong>{totals[metric.key]}</strong>
+                </div>
+              );
+            })}
+          </section>
+
+          <section className="briefing-action-grid">
+            <section className="surface signal-panel">
+              <div className="panel-title-row">
+                <div>
+                  <span className="section-kicker">Priority feed</span>
+                  <h2>Analyst Signals</h2>
+                </div>
+                <AlertTriangle size={18} />
+              </div>
+              <div className="priority-card-list">
+                {briefingInsights.length === 0 ? (
+                  <p className="muted">No analyst signals yet.</p>
+                ) : (
+                  briefingInsights.map((insight) => (
+                    <InsightCard
+                      key={insight.id}
+                      insight={insight}
+                      connectorNames={connectorNames}
+                      onOpenCompany={openCompanyFromInsight}
+                    />
+                  ))
+                )}
+              </div>
+            </section>
+            <CoverageHealthPanel coverage={briefing?.coverage_health || []} />
+          </section>
+
+          {briefing?.recommended_actions?.length ? (
+            <section className="surface recommendations-panel">
+              <div className="panel-title-row">
+                <div>
+                  <span className="section-kicker">Next best actions</span>
+                  <h2>Recommended Response</h2>
+                </div>
+                <Check size={18} />
+              </div>
+              <div className="recommendation-list">
+                {briefing.recommended_actions.map((item) => (
+                  <article key={item.id} className={`recommendation-row impact-${item.impact}`}>
+                    <span>{titleCase(item.recommendation_type)}</span>
+                    <strong>{item.action}</strong>
+                    <small>
+                      {impactLabel(item.impact)} • {urgencyLabel(item.urgency)} • Owner: {titleCase(item.owner_role)}
+                    </small>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </main>
+      ) : null}
+
+      {activeView === "signals" ? (
+        <section className="surface signal-panel full">
+          <div className="panel-title-row">
+            <div>
+              <span className="section-kicker">Progressive disclosure</span>
+              <h2>Signals and Evidence</h2>
+              <p>Start with the analyst interpretation, then inspect the source rows that support it.</p>
+            </div>
+            <Radar size={18} />
+          </div>
+          <div className="priority-card-list two-col">
+            {briefingInsights.length === 0 ? (
+              <p className="muted">No strategic signals yet. Add competitor sources or run enrichment.</p>
+            ) : (
+              briefingInsights.map((insight) => (
+                <InsightCard
+                  key={insight.id}
+                  insight={insight}
+                  connectorNames={connectorNames}
+                  onOpenCompany={openCompanyFromInsight}
+                />
+              ))
+            )}
+          </div>
+        </section>
+      ) : null}
 
       {activeView === "sources" ? (
         <section className="surface">

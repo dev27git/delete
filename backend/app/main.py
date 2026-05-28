@@ -29,7 +29,14 @@ from .models import (
     IngestionJob,
 )
 from .schemas import (
+    AskConcentricRequest,
+    AskConcentricResponse,
     AutoDiscoverResponse,
+    BriefingEvidenceRead,
+    BriefingInsightRead,
+    BriefingRead,
+    BriefingRecommendationRead,
+    CoverageHealthRead,
     DecisionPolicyRead,
     CompetitorCandidateRead,
     CompanyClaimRead,
@@ -45,6 +52,7 @@ from .schemas import (
     IngestionJobRead,
     MergeReviewAction,
     MergeReviewRead,
+    OnboardingStepRead,
     ToolSignal,
 )
 from .scraper import (
@@ -459,6 +467,222 @@ def _serialize_company_summary(
         features=_load_features(company.feature_set_json),
         tools=_load_tools(company.tool_set_json),
     )
+
+
+def _impact_from_score(score: float) -> str:
+    if score >= 12:
+        return "high"
+    if score >= 5:
+        return "medium"
+    return "low"
+
+
+def _urgency_from_impact(impact: str) -> str:
+    if impact == "high":
+        return "this_week"
+    if impact == "medium":
+        return "monitor"
+    return "low_priority"
+
+
+def _clamp_confidence(value: float) -> float:
+    return round(min(max(value, 0.35), 0.96), 2)
+
+
+def _signal_names(items: list[FeatureSignal] | list[ToolSignal], limit: int = 3) -> str:
+    names = [item.name for item in items[:limit]]
+    if not names:
+        return "new market signals"
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + f", and {names[-1]}"
+
+
+def _briefing_evidence_from_news(company: CompanyProfile, news: CompanyNews) -> BriefingEvidenceRead:
+    return BriefingEvidenceRead(
+        id=news.id,
+        source_type=news.source,
+        title=news.title,
+        url=news.article_url,
+        publisher=news.publisher,
+        company_id=company.id,
+        company_name=_safe_company_name(company.company_name, company.primary_domain),
+        published_at=news.published_at,
+        relevance_score=round(_news_item_relevance_score(company=company, item=news), 2),
+    )
+
+
+def _briefing_evidence_from_source(company: CompanyProfile, source: CompanySource) -> BriefingEvidenceRead:
+    return BriefingEvidenceRead(
+        id=source.id,
+        source_type=source.source_type,
+        title=source.page_title or source.detected_company_name or source.source_domain,
+        url=source.source_url,
+        publisher=source.source_domain,
+        company_id=company.id,
+        company_name=_safe_company_name(company.company_name, company.primary_domain),
+        published_at=source.published_at or source.scraped_at,
+        relevance_score=round(source.confidence, 2),
+    )
+
+
+def _recent_company_evidence(company: CompanyProfile, limit: int = 3) -> list[BriefingEvidenceRead]:
+    news_items = sorted(
+        _relevant_company_news_items(company),
+        key=lambda item: item.published_at or item.created_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    evidence = [_briefing_evidence_from_news(company, item) for item in news_items[:limit]]
+    if len(evidence) >= limit:
+        return evidence
+
+    source_items = sorted(
+        company.sources,
+        key=lambda item: (item.confidence, item.scraped_at or item.updated_at),
+        reverse=True,
+    )
+    for source in source_items:
+        if len(evidence) >= limit:
+            break
+        evidence.append(_briefing_evidence_from_source(company, source))
+    return evidence
+
+
+def _company_connector_count(company: CompanyProfile) -> int:
+    return sum(
+        count
+        for source, count in _company_news_source_counts(company).items()
+        if source.startswith("enrichment:")
+    )
+
+
+def _company_coverage_health(company: CompanyProfile) -> CoverageHealthRead:
+    relevant_news_count = len(_relevant_company_news_items(company))
+    connector_count = _company_connector_count(company)
+    high_confidence_claim_count = _count_high_confidence_claims(company)
+    source_types = {source.source_type for source in company.sources}
+    missing_sources: list[str] = []
+    if not source_types.intersection({"website", "product", "docs", "discovered"}):
+        missing_sources.append("Primary website or product page")
+    if relevant_news_count == 0:
+        missing_sources.append("Relevant news")
+    if connector_count == 0:
+        missing_sources.append("Connector market signals")
+    if not _resolve_company_linkedin_url(company):
+        missing_sources.append("LinkedIn/company social signal")
+    if high_confidence_claim_count == 0:
+        missing_sources.append("Evidence-backed claims")
+
+    coverage_score = min(
+        100,
+        18
+        + min(company.source_count, 4) * 12
+        + min(relevant_news_count, 8) * 3
+        + min(connector_count, 4) * 5
+        + min(high_confidence_claim_count, 8) * 2,
+    )
+    if coverage_score >= 78:
+        status_label = "healthy"
+        note = "Enough evidence for strategic comparison."
+    elif coverage_score >= 46:
+        status_label = "needs_attention"
+        note = "Useful but still missing source diversity."
+    else:
+        status_label = "thin"
+        note = "Add direct product, docs, news, or LinkedIn sources before trusting strategy calls."
+
+    return CoverageHealthRead(
+        company_id=company.id,
+        company_name=_safe_company_name(company.company_name, company.primary_domain),
+        coverage_score=coverage_score,
+        status=status_label,
+        source_count=company.source_count,
+        news_count=relevant_news_count,
+        connector_count=connector_count,
+        high_confidence_claim_count=high_confidence_claim_count,
+        missing_sources=missing_sources[:4],
+        note=note,
+    )
+
+
+def _build_onboarding_steps(
+    *,
+    competitor_count: int,
+    source_count: int,
+    insight_count: int,
+    baseline: CompanyProfile,
+    coverage_health: list[CoverageHealthRead],
+) -> list[OnboardingStepRead]:
+    baseline_features = _load_features(baseline.feature_set_json)
+    baseline_tools = _load_tools(baseline.tool_set_json)
+    healthy_companies = [item for item in coverage_health if item.status == "healthy"]
+    partial_coverage = [item for item in coverage_health if item.status != "thin"]
+
+    def status_for(condition: bool, partial: bool = False) -> str:
+        if condition:
+            return "complete"
+        if partial:
+            return "in_progress"
+        return "pending"
+
+    return [
+        OnboardingStepRead(
+            id="add_competitors",
+            label="Add 3 competitors",
+            description="Start with the companies your product, sales, or strategy teams discuss every week.",
+            status=status_for(competitor_count >= 3, competitor_count > 0),
+        ),
+        OnboardingStepRead(
+            id="generate_briefing",
+            label="Generate first briefing",
+            description="Concentric turns sources into a short list of strategic signals and evidence.",
+            status=status_for(insight_count > 0, source_count > 0),
+        ),
+        OnboardingStepRead(
+            id="profile_concentric",
+            label="Confirm Concentric baseline",
+            description="Add or scrape Concentric product evidence so gaps are compared against your real posture.",
+            status=status_for(bool(baseline_features or baseline_tools), baseline.source_count > 0),
+        ),
+        OnboardingStepRead(
+            id="improve_coverage",
+            label="Improve signal coverage",
+            description="Blend website, product, news, LinkedIn, and enrichment connectors for each priority competitor.",
+            status=status_for(len(healthy_companies) >= min(competitor_count, 3), bool(partial_coverage)),
+        ),
+        OnboardingStepRead(
+            id="review_gap",
+            label="Review first strategic gap",
+            description="Open the gap view once the briefing identifies a competitor capability Concentric lacks.",
+            status=status_for(insight_count > 0 and competitor_count > 0),
+        ),
+    ]
+
+
+def _recommendations_from_insights(insights: list[BriefingInsightRead]) -> list[BriefingRecommendationRead]:
+    recommendations: list[BriefingRecommendationRead] = []
+    for insight in insights[:4]:
+        if insight.insight_type == "market_gap":
+            recommendation_type = "product"
+            owner_role = "product_marketing"
+        elif insight.insight_type == "market_momentum":
+            recommendation_type = "positioning"
+            owner_role = "competitive_intelligence"
+        else:
+            recommendation_type = "source_quality"
+            owner_role = "revops"
+        recommendations.append(
+            BriefingRecommendationRead(
+                id=f"rec-{insight.id}",
+                recommendation_type=recommendation_type,
+                action=insight.recommended_action,
+                urgency=insight.urgency,
+                impact=insight.impact,
+                linked_insight_ids=[insight.id],
+                owner_role=owner_role,
+            )
+        )
+    return recommendations
 
 
 def _dedupe_feature_hits(items: list[FeatureHit]) -> list[FeatureSignal]:
@@ -1197,7 +1421,7 @@ def _refresh_company_enrichment(db: Session, company: CompanyProfile) -> dict[st
     return added_counts
 
 
-def _ensure_baseline_profile(db: Session) -> CompanyProfile:
+def _ensure_baseline_profile(db: Session, *, scrape_missing_source: bool = True) -> CompanyProfile:
     key = normalize_company_key(BASELINE_COMPANY_NAME)
     baseline = db.scalar(select(CompanyProfile).where(CompanyProfile.company_key == key))
     if baseline:
@@ -1230,7 +1454,8 @@ def _ensure_baseline_profile(db: Session) -> CompanyProfile:
         )
         db.add(source)
         db.flush()
-        _scrape_and_merge_source(db=db, source=source)
+        if scrape_missing_source:
+            _scrape_and_merge_source(db=db, source=source)
     return baseline
 
 
@@ -1686,15 +1911,13 @@ def run_ingestion_cycle(db: Session = Depends(get_db)) -> dict[str, int]:
     return {"refreshed_companies": refreshed}
 
 
-@app.get("/comparison", response_model=ComparisonRead)
-def get_comparison(
-    refresh_baseline: bool = Query(
-        default=False,
-        description="When true, refreshes Concentric baseline news before comparison. Default is read-only for API stability.",
-    ),
-    db: Session = Depends(get_db),
+def _build_comparison(
+    db: Session,
+    *,
+    refresh_baseline: bool = False,
+    scrape_missing_baseline: bool = True,
 ) -> ComparisonRead:
-    baseline = _ensure_baseline_profile(db)
+    baseline = _ensure_baseline_profile(db, scrape_missing_source=scrape_missing_baseline)
     if refresh_baseline:
         try:
             with _write_lock:
@@ -1702,7 +1925,7 @@ def get_comparison(
                 _refresh_company_news(db, baseline)
                 db.commit()
         except OperationalError:
-            # Keep comparison endpoint available even when concurrent write traffic temporarily locks SQLite.
+            # Keep comparison available even when concurrent write traffic temporarily locks SQLite.
             db.rollback()
             baseline = db.get(CompanyProfile, baseline.id) or baseline
 
@@ -1777,3 +2000,268 @@ def get_comparison(
         baseline_tools=baseline_tools,
         competitors=rows,
     )
+
+
+def _build_briefing(db: Session) -> BriefingRead:
+    comparison = _build_comparison(db=db, refresh_baseline=False, scrape_missing_baseline=False)
+    baseline = db.scalar(
+        select(CompanyProfile)
+        .where(CompanyProfile.company_key == normalize_company_key(BASELINE_COMPANY_NAME))
+        .options(
+            selectinload(CompanyProfile.sources),
+            selectinload(CompanyProfile.news_items),
+            selectinload(CompanyProfile.claims),
+        )
+    ) or _ensure_baseline_profile(db, scrape_missing_source=False)
+    companies = db.scalars(
+        select(CompanyProfile)
+        .options(
+            selectinload(CompanyProfile.sources),
+            selectinload(CompanyProfile.news_items),
+            selectinload(CompanyProfile.claims),
+        )
+        .order_by(CompanyProfile.source_count.desc(), CompanyProfile.company_name.asc())
+    ).all()
+    company_by_id = {company.id: company for company in companies}
+    competitors = [company for company in companies if company.id != baseline.id]
+
+    insights: list[BriefingInsightRead] = []
+    for row in comparison.competitors[:8]:
+        company = company_by_id.get(row.company_id)
+        if company is None:
+            continue
+        feature_count = len(row.competitor_only_features)
+        tool_count = len(row.competitor_only_tools)
+        if feature_count + tool_count == 0 and row.market_signal_count == 0:
+            continue
+
+        evidence = _recent_company_evidence(company, limit=3)
+        claim_count = _count_high_confidence_claims(company)
+        if feature_count + tool_count > 0:
+            impact = _impact_from_score(row.gap_score)
+            named_signals = _signal_names([*row.competitor_only_features, *row.competitor_only_tools])
+            insight_id = f"gap-{row.company_id}"
+            insights.append(
+                BriefingInsightRead(
+                    id=insight_id,
+                    insight_type="market_gap",
+                    headline=f"{row.company_name} is creating pressure around {named_signals}",
+                    summary=(
+                        f"{row.company_name} shows {feature_count} differentiated features and {tool_count} "
+                        f"differentiated tools against the Concentric baseline."
+                    ),
+                    competitor_id=row.company_id,
+                    competitor_name=row.company_name,
+                    impact=impact,
+                    confidence=_clamp_confidence(0.58 + min(row.gap_score, 20) / 55 + min(claim_count, 6) * 0.025),
+                    urgency=_urgency_from_impact(impact),
+                    recommended_action=(
+                        f"Review Concentric positioning and roadmap coverage for {named_signals}; prepare a counter "
+                        f"message for deals where {row.company_name} appears."
+                    ),
+                    why_it_matters=(
+                        "This is the clearest product or messaging delta currently visible from public evidence."
+                    ),
+                    evidence=evidence,
+                )
+            )
+        elif row.market_signal_count > 0:
+            impact = _impact_from_score(row.market_signal_score + 4)
+            insight_id = f"momentum-{row.company_id}"
+            insights.append(
+                BriefingInsightRead(
+                    id=insight_id,
+                    insight_type="market_momentum",
+                    headline=f"{row.company_name} has elevated market activity",
+                    summary=f"{row.market_signal_count} relevant market signals were found from news and connectors.",
+                    competitor_id=row.company_id,
+                    competitor_name=row.company_name,
+                    impact=impact,
+                    confidence=_clamp_confidence(0.55 + min(row.market_signal_count, 12) * 0.035),
+                    urgency=_urgency_from_impact(impact),
+                    recommended_action=(
+                        f"Scan {row.company_name}'s latest evidence for launch, hiring, or positioning changes before "
+                        "the next competitive review."
+                    ),
+                    why_it_matters="A rising signal volume often precedes a launch, campaign, partnership, or narrative shift.",
+                    evidence=evidence,
+                )
+            )
+
+    seen_insight_companies = {insight.competitor_id for insight in insights if insight.competitor_id}
+    momentum_candidates = sorted(
+        competitors,
+        key=lambda company: len(_relevant_company_news_items(company)),
+        reverse=True,
+    )
+    for company in momentum_candidates:
+        if len(insights) >= 8:
+            break
+        if company.id in seen_insight_companies:
+            continue
+        news_count = len(_relevant_company_news_items(company))
+        if news_count < 2:
+            continue
+        impact = _impact_from_score(news_count)
+        insights.append(
+            BriefingInsightRead(
+                id=f"momentum-{company.id}",
+                insight_type="market_momentum",
+                headline=f"{_safe_company_name(company.company_name, company.primary_domain)} is showing fresh activity",
+                summary=f"{news_count} relevant news or connector signals are available for inspection.",
+                competitor_id=company.id,
+                competitor_name=_safe_company_name(company.company_name, company.primary_domain),
+                impact=impact,
+                confidence=_clamp_confidence(0.54 + min(news_count, 10) * 0.035),
+                urgency=_urgency_from_impact(impact),
+                recommended_action="Open the evidence drawer and verify whether the activity maps to a launch, campaign, or partner move.",
+                why_it_matters="Fresh activity is most useful when it is reviewed before a sales cycle or roadmap decision.",
+                evidence=_recent_company_evidence(company, limit=3),
+            )
+        )
+
+    coverage_health = [_company_coverage_health(company) for company in competitors]
+    coverage_health.sort(key=lambda item: (item.coverage_score, item.company_name))
+    if not insights and competitors:
+        for item in coverage_health[:3]:
+            company = company_by_id.get(item.company_id)
+            if company is None:
+                continue
+            insights.append(
+                BriefingInsightRead(
+                    id=f"coverage-{item.company_id}",
+                    insight_type="coverage_gap",
+                    headline=f"{item.company_name} needs better evidence coverage",
+                    summary=item.note,
+                    competitor_id=item.company_id,
+                    competitor_name=item.company_name,
+                    impact="medium" if item.status == "thin" else "low",
+                    confidence=0.64,
+                    urgency="monitor",
+                    recommended_action=f"Add {', '.join(item.missing_sources[:2]) or 'direct source evidence'} for {item.company_name}.",
+                    why_it_matters="Strategic recommendations should not be trusted until the system has direct and recent evidence.",
+                    evidence=_recent_company_evidence(company, limit=2),
+                )
+            )
+
+    insights.sort(
+        key=lambda item: (
+            {"high": 3, "medium": 2, "low": 1}.get(item.impact, 0),
+            item.confidence,
+            len(item.evidence),
+        ),
+        reverse=True,
+    )
+    top_insights = insights[:5]
+    urgent_signals = [item for item in insights if item.impact == "high"][:3] or top_insights[:3]
+    recommendations = _recommendations_from_insights(top_insights)
+
+    total_news = sum(len(_relevant_company_news_items(company)) for company in competitors)
+    total_features = sum(len(_load_features(company.feature_set_json)) for company in competitors)
+    total_tools = sum(len(_load_tools(company.tool_set_json)) for company in competitors)
+    totals = {
+        "companies": len(competitors),
+        "sources": sum(company.source_count for company in competitors),
+        "features": total_features,
+        "tools": total_tools,
+        "news": total_news,
+        "urgent_signals": len(urgent_signals),
+    }
+    onboarding = _build_onboarding_steps(
+        competitor_count=len(competitors),
+        source_count=totals["sources"],
+        insight_count=len(top_insights),
+        baseline=baseline,
+        coverage_health=coverage_health,
+    )
+
+    if not competitors:
+        summary = "Add three competitors to generate the first strategic briefing."
+    elif top_insights:
+        summary = f"{len(top_insights)} priority insights are ready from {len(competitors)} tracked competitors."
+    else:
+        summary = "Competitors are tracked, but more direct evidence is needed before strategy recommendations are useful."
+
+    return BriefingRead(
+        date=_now(),
+        summary=summary,
+        top_insights=top_insights,
+        urgent_signals=urgent_signals,
+        coverage_health=coverage_health[:8],
+        recommended_actions=recommendations,
+        onboarding=onboarding,
+        ask_suggestions=[
+            "What changed this week across my competitors?",
+            "Which competitor has the largest product gap against Concentric?",
+            "Which companies need better evidence coverage?",
+            "Show evidence behind the top priority signal.",
+        ],
+        totals=totals,
+    )
+
+
+@app.get("/briefing", response_model=BriefingRead)
+def get_briefing(db: Session = Depends(get_db)) -> BriefingRead:
+    return _build_briefing(db=db)
+
+
+@app.post("/ai/ask", response_model=AskConcentricResponse)
+def ask_concentric_ai(request: AskConcentricRequest, db: Session = Depends(get_db)) -> AskConcentricResponse:
+    briefing = _build_briefing(db=db)
+    question = request.question.strip().lower()
+    insight_pool = list({insight.id: insight for insight in [*briefing.top_insights, *briefing.urgent_signals]}.values())
+    selected: BriefingInsightRead | None = None
+
+    for insight in insight_pool:
+        competitor_name = (insight.competitor_name or "").lower()
+        if competitor_name and competitor_name in question:
+            selected = insight
+            break
+    if selected is None and any(token in question for token in ["gap", "lacks", "behind", "ahead"]):
+        selected = next((insight for insight in insight_pool if insight.insight_type == "market_gap"), None)
+    if selected is None and any(token in question for token in ["coverage", "source", "evidence quality"]):
+        weak_coverage = briefing.coverage_health[0] if briefing.coverage_health else None
+        if weak_coverage:
+            return AskConcentricResponse(
+                answer=(
+                    f"{weak_coverage.company_name} has the weakest evidence coverage right now "
+                    f"({weak_coverage.coverage_score}/100)."
+                ),
+                why_it_matters=weak_coverage.note,
+                evidence=[],
+                recommended_next_step=(
+                    f"Add {', '.join(weak_coverage.missing_sources[:2]) or 'more direct evidence'} "
+                    f"for {weak_coverage.company_name}."
+                ),
+                confidence=0.7,
+            )
+    if selected is None:
+        selected = insight_pool[0] if insight_pool else None
+
+    if selected is None:
+        return AskConcentricResponse(
+            answer="I need at least one competitor source before I can answer with evidence.",
+            why_it_matters="The analyst layer only responds from structured company, source, news, and gap data.",
+            evidence=[],
+            recommended_next_step="Add three competitor websites or product pages to generate the first briefing.",
+            confidence=0.5,
+        )
+
+    return AskConcentricResponse(
+        answer=selected.summary,
+        why_it_matters=selected.why_it_matters,
+        evidence=selected.evidence,
+        recommended_next_step=selected.recommended_action,
+        confidence=selected.confidence,
+    )
+
+
+@app.get("/comparison", response_model=ComparisonRead)
+def get_comparison(
+    refresh_baseline: bool = Query(
+        default=False,
+        description="When true, refreshes Concentric baseline news before comparison. Default is read-only for API stability.",
+    ),
+    db: Session = Depends(get_db),
+) -> ComparisonRead:
+    return _build_comparison(db=db, refresh_baseline=refresh_baseline)
