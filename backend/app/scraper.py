@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from urllib.parse import quote_plus, urlparse, urlunparse
+from urllib.parse import quote, quote_plus, urlparse, urlunparse
 from xml.etree import ElementTree
 
 import httpx
 
 MAX_SUMMARY_CHARS = 900
 MAX_NEWS_ITEMS = 12
+GOOGLE_NEWS_HOSTS = {"news.google.com", "www.news.google.com"}
+GOOGLE_NEWS_BATCH_URL = "https://news.google.com/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je"
+GOOGLE_NEWS_DECODE_CACHE: dict[str, str | None] = {}
 
 TOOL_KEYWORDS: dict[str, tuple[str, str]] = {
     "aws": ("AWS", "Cloud Infrastructure"),
@@ -44,26 +48,62 @@ TOOL_KEYWORDS: dict[str, tuple[str, str]] = {
     "openai": ("OpenAI", "AI Provider"),
     "anthropic": ("Anthropic", "AI Provider"),
     "hugging face": ("Hugging Face", "AI Platform"),
+    "rubrik security cloud": ("Rubrik Security Cloud", "Data Security Platform"),
+    "tenable one": ("Tenable One", "Exposure Management"),
+    "opentext data security": ("OpenText Data Security", "Data Security Platform"),
+    "intellistack": ("Intellistack", "Workflow Automation"),
+    "formstack": ("Formstack", "Workflow Automation"),
 }
 
 FEATURE_PATTERNS: list[tuple[str, str, str]] = [
+    (r"\bdata security\b|\bprotects? enterprise data\b", "Data Security", "Security"),
     (r"\bdata security posture management\b|\bdspm\b", "Data Security Posture Management", "Security"),
     (r"\bdata discovery\b|\bdiscover sensitive data\b", "Sensitive Data Discovery", "Discovery"),
     (r"\bdata classification\b|\bclassify data\b", "Data Classification", "Discovery"),
+    (r"\bsensitive data protection\b|\bdata protection\b", "Sensitive Data Protection", "Security"),
     (r"\bdata loss prevention\b|\bdlp\b", "Data Loss Prevention", "Prevention"),
     (r"\brisk prioritization\b|\brisk scoring\b", "Risk Prioritization", "Risk"),
     (r"\binsider risk\b", "Insider Risk Detection", "Risk"),
     (r"\baccess governance\b|\baccess control\b", "Access Governance", "Governance"),
     (r"\bpolicy automation\b|\bautomated policy\b", "Policy Automation", "Governance"),
-    (r"\bcloud security\b|\bcloud posture\b", "Cloud Security", "Cloud"),
+    (r"\bcloud security\b|\bcloud and ai security\b|\bcloud posture\b", "Cloud Security", "Cloud"),
     (r"\bsaas security\b|\bsaas posture\b", "SaaS Security", "Cloud"),
     (r"\bthreat detection\b|\banomaly detection\b", "Threat Detection", "Detection"),
+    (r"\bexposure management\b", "Exposure Management", "Exposure"),
+    (r"\bvulnerability\b|\bvulnerability management\b|\bvulnerability assessment\b", "Vulnerability Management", "Exposure"),
+    (r"\battack surface\b|\battack surfaces\b", "Attack Surface Management", "Exposure"),
+    (r"\bcyber risk\b|\breduce cyber risk\b", "Cyber Risk Reduction", "Risk"),
+    (r"\bcyber resilience\b|\bresilience platform\b", "Cyber Resilience", "Resilience"),
+    (r"\bbackup\b|\bdata backup\b|\brecovery\b|\bdisaster recovery\b", "Data Backup and Recovery", "Resilience"),
+    (r"\bransomware\b", "Ransomware Recovery", "Resilience"),
+    (r"\bworkflow automation\b|\bworkflow platform\b|\bworkflows\b|\bautomate workflows\b|\bautomate the work\b|\bprocess automation\b", "Workflow Automation", "Automation"),
+    (r"\bno code\b|\bno-code\b", "No-Code Workflow Builder", "Automation"),
+    (r"\bdocument generation\b|\bgenerate docs\b|\bgenerate documents\b|\bdoc gen\b", "Document Generation", "Automation"),
+    (r"\besignature\b|\be-signature\b|\belectronic signature\b|\bcollect esignatures\b", "Electronic Signature", "Automation"),
+    (r"\bcontract lifecycle\b|\bcontract lifecycle management\b", "Contract Lifecycle Management", "Automation"),
+    (r"\bforms\b|\bcustom forms\b|\bbuild forms\b", "Form Automation", "Automation"),
+    (r"\bdata fabric\b", "Data Fabric", "Data Infrastructure"),
     (r"\bprompt injection\b|\bindirect prompt injection\b", "Prompt Injection Defense", "AI Security"),
-    (r"\bmodel security\b|\bllm security\b", "LLM Security Controls", "AI Security"),
+    (r"\bai security\b|\bmodel security\b|\bllm security\b", "AI Security Controls", "AI Security"),
     (r"\bagent security\b|\bai agent security\b", "AI Agent Runtime Security", "AI Security"),
     (r"\bcompliance\b|\bregulatory\b", "Compliance Reporting", "Compliance"),
     (r"\bdata governance\b", "Data Governance", "Governance"),
+    (r"\binformation governance\b|\binformation management\b", "Information Governance", "Governance"),
 ]
+
+DOMAIN_FEATURE_HINTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "rubrik.com": (
+        ("Cyber Resilience", "Resilience"),
+        ("Data Backup and Recovery", "Resilience"),
+        ("Ransomware Recovery", "Resilience"),
+        ("Data Security", "Security"),
+    ),
+}
+
+DOMAIN_TOOL_HINTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "rubrik.com": (("Rubrik Security Cloud", "Data Security Platform"),),
+    "opentext.com": (("OpenText Data Security", "Data Security Platform"),),
+}
 
 ORG_TYPES = {
     "organization",
@@ -169,6 +209,10 @@ def normalize_url(raw_url: str) -> str:
 def extract_domain(url: str) -> str:
     parsed = urlparse(url)
     return parsed.netloc.lower()
+
+
+def _domain_key(url: str) -> str:
+    return extract_domain(url).removeprefix("www.")
 
 
 def normalize_company_key(company_name: str) -> str:
@@ -555,7 +599,7 @@ def _dedupe_tool_hits(items: list[ToolHit]) -> list[ToolHit]:
 
 def _extract_features(text: str) -> list[FeatureHit]:
     hits: list[FeatureHit] = []
-    lowered = text.lower()
+    lowered = re.sub(r"[-_/]+", " ", text.lower())
     for pattern, feature_name, category in FEATURE_PATTERNS:
         if re.search(pattern, lowered, flags=re.IGNORECASE):
             hits.append(FeatureHit(name=feature_name, category=category))
@@ -563,12 +607,22 @@ def _extract_features(text: str) -> list[FeatureHit]:
 
 
 def _extract_tools(text: str) -> list[ToolHit]:
-    lowered = text.lower()
+    lowered = re.sub(r"[-_/]+", " ", text.lower())
     hits: list[ToolHit] = []
     for needle, (label, category) in TOOL_KEYWORDS.items():
         if needle in lowered:
             hits.append(ToolHit(name=label, category=category))
     return _dedupe_tool_hits(hits)
+
+
+def _domain_feature_hints(url: str) -> list[FeatureHit]:
+    hints = DOMAIN_FEATURE_HINTS.get(_domain_key(url), ())
+    return [FeatureHit(name=name, category=category) for name, category in hints]
+
+
+def _domain_tool_hints(url: str) -> list[ToolHit]:
+    hints = DOMAIN_TOOL_HINTS.get(_domain_key(url), ())
+    return [ToolHit(name=name, category=category) for name, category in hints]
 
 
 def _score_confidence(
@@ -670,14 +724,17 @@ def scrape_source_url(url: str) -> ScrapeResult:
     summary = _build_summary(extractor.content_blocks, fallback=meta_description)
     detection_text = " ".join(
         [
+            str(response.url),
+            response_domain,
+            company_name,
             extractor.title,
             meta_description or "",
             *extractor.headings,
             *extractor.content_blocks,
         ]
     )
-    features = _extract_features(detection_text)
-    tools = _extract_tools(detection_text)
+    features = _dedupe_feature_hits([*_extract_features(detection_text), *_domain_feature_hints(str(response.url))])
+    tools = _dedupe_tool_hits([*_extract_tools(detection_text), *_domain_tool_hints(str(response.url))])
     confidence = _score_confidence(
         company_from_schema=company_from_schema is not None,
         feature_count=len(features),
@@ -758,6 +815,244 @@ def _fetch_news_feed(feed_url: str) -> list[NewsItem]:
     return items
 
 
+def _google_news_article_id(article_url: str) -> str | None:
+    try:
+        parsed = urlparse(article_url)
+    except ValueError:
+        return None
+    if parsed.netloc.lower() not in GOOGLE_NEWS_HOSTS:
+        return None
+
+    parts = [part for part in parsed.path.split("/") if part]
+    for marker in ("articles", "read"):
+        if marker in parts:
+            index = parts.index(marker)
+            if len(parts) > index + 1:
+                return parts[index + 1]
+    return None
+
+
+def _read_varint(data: bytes, start: int = 0) -> tuple[int, int] | None:
+    value = 0
+    shift = 0
+    index = start
+    while index < len(data):
+        byte = data[index]
+        value |= (byte & 0x7F) << shift
+        index += 1
+        if byte < 0x80:
+            return value, index
+        shift += 7
+        if shift > 28:
+            return None
+    return None
+
+
+def _decode_embedded_google_news_url(article_id: str) -> str | None:
+    padding = "=" * ((4 - len(article_id) % 4) % 4)
+    try:
+        raw = base64.urlsafe_b64decode(f"{article_id}{padding}")
+    except (ValueError, base64.binascii.Error):
+        return None
+
+    prefix = b'\x08\x13"'
+    if raw.startswith(prefix):
+        raw = raw[len(prefix) :]
+
+    length_info = _read_varint(raw)
+    if not length_info:
+        return None
+
+    length, offset = length_info
+    if length <= 0 or offset + length > len(raw):
+        return None
+
+    candidate = raw[offset : offset + length].decode("utf-8", errors="ignore").strip()
+    if candidate.startswith(("http://", "https://", "AU_yqL")):
+        return candidate
+    return None
+
+
+def _google_news_decoding_params(article_id: str, client: httpx.Client) -> tuple[str, str] | None:
+    for path in (f"articles/{article_id}", f"rss/articles/{article_id}"):
+        try:
+            response = client.get(f"https://news.google.com/{path}")
+            response.raise_for_status()
+        except httpx.HTTPError:
+            continue
+
+        signature_match = re.search(r'data-n-a-sg="([^"]+)"', response.text)
+        timestamp_match = re.search(r'data-n-a-ts="([^"]+)"', response.text)
+        if signature_match and timestamp_match:
+            return signature_match.group(1), timestamp_match.group(1)
+    return None
+
+
+def _decode_google_news_batchexecute_with_params(
+    article_id: str,
+    client: httpx.Client,
+    signature: str,
+    timestamp: str,
+) -> str | None:
+    payload = [
+        "Fbv4je",
+        (
+            '["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],'
+            f'"X","X",1,[1,1,1],1,1,null,0,0,null,0],"{article_id}",{timestamp},"{signature}"]'
+        ),
+    ]
+    try:
+        response = client.post(
+            "https://news.google.com/_/DotsSplashUi/data/batchexecute",
+            content=f"f.req={quote(json.dumps([[payload]], separators=(',', ':')))}",
+            headers={
+                **HEADERS,
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                "Referer": "https://news.google.com/",
+            },
+        )
+        response.raise_for_status()
+        payload_text = response.text.split("\n\n", 1)[1]
+        parsed_data = json.loads(payload_text)[:-2]
+        first_row = parsed_data[0]
+        if first_row and isinstance(first_row[0], list):
+            first_row = first_row[0]
+        decoded_payload = json.loads(first_row[2])
+    except (httpx.HTTPError, IndexError, TypeError, json.JSONDecodeError):
+        return None
+
+    if len(decoded_payload) > 1 and isinstance(decoded_payload[1], str):
+        decoded_url = decoded_payload[1].replace("\\/", "/")
+        if decoded_url.startswith(("http://", "https://")):
+            return decoded_url
+    return None
+
+
+def _decode_google_news_batchexecute_legacy(article_id: str, client: httpx.Client) -> str | None:
+    request_payload = [
+        [
+            [
+                "Fbv4je",
+                json.dumps(
+                    [
+                        "garturlreq",
+                        [
+                            [
+                                "en-US",
+                                "US",
+                                ["FINANCE_TOP_INDICES", "WEB_TEST_1_0_0"],
+                                None,
+                                None,
+                                1,
+                                1,
+                                "US:en",
+                                None,
+                                180,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                0,
+                                None,
+                                None,
+                                [1608992183, 723341000],
+                            ],
+                            "en-US",
+                            "US",
+                            1,
+                            [2, 3, 4, 8],
+                            1,
+                            0,
+                            "655000234",
+                            0,
+                            0,
+                            None,
+                            0,
+                        ],
+                        article_id,
+                    ],
+                    separators=(",", ":"),
+                ),
+                None,
+                "generic",
+            ]
+        ]
+    ]
+    try:
+        response = client.post(
+            GOOGLE_NEWS_BATCH_URL,
+            data={"f.req": json.dumps(request_payload, separators=(",", ":"))},
+            headers={
+                **HEADERS,
+                "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+                "Referer": "https://news.google.com/",
+            },
+        )
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+
+    marker = '[\\"garturlres\\",\\"'
+    start = response.text.find(marker)
+    if start == -1:
+        return None
+    start += len(marker)
+    end = response.text.find('\\",', start)
+    if end == -1:
+        return None
+
+    encoded_url = response.text[start:end]
+    try:
+        decoded_url = json.loads(f'"{encoded_url}"')
+    except json.JSONDecodeError:
+        decoded_url = encoded_url.replace("\\/", "/")
+    if isinstance(decoded_url, str):
+        decoded_url = decoded_url.replace("\\/", "/")
+    if isinstance(decoded_url, str) and decoded_url.startswith(("http://", "https://")):
+        return decoded_url
+    return None
+
+
+def _decode_google_news_batchexecute(article_id: str, client: httpx.Client) -> str | None:
+    params = _google_news_decoding_params(article_id, client)
+    if params:
+        decoded = _decode_google_news_batchexecute_with_params(
+            article_id=article_id,
+            client=client,
+            signature=params[0],
+            timestamp=params[1],
+        )
+        if decoded:
+            return decoded
+    return _decode_google_news_batchexecute_legacy(article_id, client)
+
+
+def resolve_google_news_article_url(article_url: str, client: httpx.Client | None = None) -> str | None:
+    article_id = _google_news_article_id(article_url)
+    if not article_id:
+        return None
+    if article_id in GOOGLE_NEWS_DECODE_CACHE:
+        return GOOGLE_NEWS_DECODE_CACHE[article_id]
+
+    embedded = _decode_embedded_google_news_url(article_id)
+    if embedded and embedded.startswith(("http://", "https://")):
+        GOOGLE_NEWS_DECODE_CACHE[article_id] = embedded
+        return embedded
+
+    if embedded and embedded.startswith("AU_yqL"):
+        if client is None:
+            with httpx.Client(timeout=10.0, headers=HEADERS, follow_redirects=True) as decode_client:
+                decoded = _decode_google_news_batchexecute(article_id, decode_client)
+        else:
+            decoded = _decode_google_news_batchexecute(article_id, client)
+        GOOGLE_NEWS_DECODE_CACHE[article_id] = decoded
+        return decoded
+
+    GOOGLE_NEWS_DECODE_CACHE[article_id] = None
+    return None
+
+
 def fetch_news_feed(feed_url: str) -> list[NewsItem]:
     return _fetch_news_feed(feed_url=feed_url)
 
@@ -770,7 +1065,7 @@ def fetch_company_news(company_name: str, domain: str | None = None) -> list[New
 def fetch_linkedin_news(company_name: str, linkedin_url: str | None = None) -> list[NewsItem]:
     slug = extract_linkedin_slug(linkedin_url or "")
     if slug:
-        query = f"\"{company_name}\" OR site:linkedin.com/company/{slug}"
+        query = f"\"{company_name}\" site:linkedin.com/company/{slug}"
     else:
         query = f"\"{company_name}\" site:linkedin.com/company"
     feed_url = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"

@@ -4,6 +4,7 @@ import {
   Activity,
   BarChart3,
   Building2,
+  ChevronDown,
   Check,
   Database,
   Gauge,
@@ -30,7 +31,7 @@ import {
   X,
 } from "lucide-react";
 
-import { api } from "./api";
+import { API_BASE_URL, api } from "./api";
 
 const VIEWS = [
   { id: "sources", label: "Source Intake", icon: Plus },
@@ -44,6 +45,7 @@ const THEME_OPTIONS = [
   { id: "dark", label: "Dark", icon: Moon },
   { id: "liquid", label: "Liquid Glass", icon: Droplets },
   { id: "frosted", label: "Frosted Glass", icon: Snowflake },
+  { id: "warm-frosted", label: "Warm Frosted", icon: Sun },
   { id: "heritage", label: "Heritage", icon: Sparkles },
 ];
 
@@ -56,6 +58,11 @@ const METRIC_WIDGETS = [
   { key: "enrichment", label: "Market Signals", icon: Radar },
   { key: "highClaims", label: "High-Confidence Claims", icon: Check },
 ];
+
+const MAX_SOURCE_ROWS = 140;
+const MAX_COMPANY_CARDS = 120;
+const MAX_EVIDENCE_SOURCES = 80;
+const MAX_COMPARISON_ROWS = 80;
 
 function formatDate(value) {
   if (!value) return "-";
@@ -88,6 +95,30 @@ function compactText(value, maxChars = 260) {
   if (!text) return "-";
   if (text.length <= maxChars) return text;
   return `${text.slice(0, maxChars).trimEnd()}...`;
+}
+
+function isGoogleNewsUrl(value) {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname === "news.google.com" || parsed.hostname === "www.news.google.com";
+  } catch {
+    return false;
+  }
+}
+
+function articleHref(item) {
+  if (item?.id && isGoogleNewsUrl(item.article_url)) {
+    return `${API_BASE_URL}/news/${item.id}/resolve`;
+  }
+  return item?.article_url || "#";
+}
+
+function articleLinkTitle(item) {
+  if (!isGoogleNewsUrl(item?.article_url)) {
+    return "Open article";
+  }
+  return "Open Google News article";
 }
 
 function truncateText(value, maxChars = 180) {
@@ -166,6 +197,37 @@ function marketSignalBasis(sourceKey, connectorsById = {}) {
   return "External signal channel used for company market intelligence.";
 }
 
+function parseJobResultSummary(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return { text: String(value) };
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : { text: value };
+  } catch {
+    return { text: value };
+  }
+}
+
+function numericEntries(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value)
+    .map(([key, count]) => [key, Number(count || 0)])
+    .filter(([key, count]) => key && Number.isFinite(count));
+}
+
+function countTotal(entries) {
+  return entries.reduce((sum, [, count]) => sum + count, 0);
+}
+
+function resultSourceLabel(source, connectorNames = {}) {
+  return connectorNames[source] || sourceLabel(source, connectorNames);
+}
+
+function pluralize(count, singular, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 function SignalPills({ items }) {
   if (!items || items.length === 0) return <span className="muted">-</span>;
   return (
@@ -175,6 +237,64 @@ function SignalPills({ items }) {
           {item.name}
         </span>
       ))}
+    </div>
+  );
+}
+
+function JobResultCell({ job, connectorNames }) {
+  if (job.error_message) {
+    return (
+      <div className="job-result">
+        <strong>Failed</strong>
+        <span>{compactText(job.error_message, 180)}</span>
+      </div>
+    );
+  }
+
+  const result = parseJobResultSummary(job.result_summary);
+  if (!result) {
+    return <span className="muted">No result yet</span>;
+  }
+  if (result.text) {
+    return <span>{compactText(result.text, 220)}</span>;
+  }
+
+  const newsEntries = numericEntries(result.news);
+  const enrichmentEntries = numericEntries(result.enrichment);
+  const newsTotal = countTotal(newsEntries);
+  const enrichmentTotal = countTotal(enrichmentEntries);
+  const visibleBreakdown = [...newsEntries, ...enrichmentEntries]
+    .filter(([, count]) => count > 0)
+    .slice(0, 6);
+  const zeroCheckedCount = [...newsEntries, ...enrichmentEntries].filter(([, count]) => count === 0).length;
+
+  return (
+    <div className="job-result">
+      <div className="job-result-metrics">
+        <span>
+          <strong>{newsTotal}</strong>
+          News
+        </span>
+        <span>
+          <strong>{enrichmentTotal}</strong>
+          Connector items
+        </span>
+      </div>
+      {newsTotal + enrichmentTotal === 0 ? (
+        <span className="muted">No new relevant items found.</span>
+      ) : (
+        <div className="job-result-pills">
+          {visibleBreakdown.map(([source, count]) => (
+            <span key={source} className="job-result-pill">
+              {resultSourceLabel(source, connectorNames)}
+              <strong>{count}</strong>
+            </span>
+          ))}
+        </div>
+      )}
+      {zeroCheckedCount > 0 ? (
+        <span className="job-result-note">{pluralize(zeroCheckedCount, "source")} checked with no additions</span>
+      ) : null}
     </div>
   );
 }
@@ -206,51 +326,6 @@ function ExpandableCellText({ text, maxChars = 170 }) {
   );
 }
 
-function LiquidGlassFilterDefs() {
-  return (
-    <svg className="liquid-glass-filter" aria-hidden="true" focusable="false">
-      <defs>
-        <filter id="liquid-glass-refraction" colorInterpolationFilters="sRGB">
-          <feTurbulence
-            type="fractalNoise"
-            baseFrequency="0.018 0.024"
-            numOctaves="2"
-            seed="7"
-            result="liquidNoise"
-          />
-          <feDisplacementMap
-            in="SourceGraphic"
-            in2="liquidNoise"
-            scale="10"
-            xChannelSelector="R"
-            yChannelSelector="G"
-            result="refracted"
-          />
-          <feGaussianBlur in="refracted" stdDeviation="0.18" result="softRefracted" />
-          <feSpecularLighting
-            in="liquidNoise"
-            surfaceScale="2.6"
-            specularConstant="0.55"
-            specularExponent="24"
-            lightingColor="#ffffff"
-            result="specularLight"
-          >
-            <feDistantLight azimuth="-55" elevation="58" />
-          </feSpecularLighting>
-          <feComposite in="specularLight" in2="softRefracted" operator="in" result="specularMask" />
-          <feColorMatrix
-            in="softRefracted"
-            type="matrix"
-            values="1.05 0 0 0 0  0 1.05 0 0 0  0 0 1.08 0 0  0 0 0 1 0"
-            result="boostedGlass"
-          />
-          <feBlend in="boostedGlass" in2="specularMask" mode="screen" />
-        </filter>
-      </defs>
-    </svg>
-  );
-}
-
 function App() {
   const [activeView, setActiveView] = useState("sources");
   const [urlInput, setUrlInput] = useState("");
@@ -264,8 +339,10 @@ function App() {
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [themeMode, setThemeMode] = useState("dark");
   const [companyQuery, setCompanyQuery] = useState("");
+  const [sourceQuery, setSourceQuery] = useState("");
   const [decisionPolicy, setDecisionPolicy] = useState(null);
   const [autoDiscoverResult, setAutoDiscoverResult] = useState(null);
+  const [opsLoaded, setOpsLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState({
@@ -279,55 +356,133 @@ function App() {
     runCycle: false,
   });
 
-  const loadOverview = async () => {
-    setLoading(true);
+  const resolveSelectedCompanyId = (currentId, nextCompanies) => {
+    if (nextCompanies.length === 0) return null;
+    if (currentId && nextCompanies.some((company) => company.id === currentId)) {
+      return currentId;
+    }
+    return nextCompanies[0].id;
+  };
+
+  const loadOverview = async ({ showLoading = true } = {}) => {
+    if (showLoading) {
+      setLoading(true);
+    }
     setError("");
     try {
-      const [
-        nextSources,
-        nextCompanies,
-        nextComparison,
-        nextConnectors,
-        nextMergeReviews,
-        nextJobs,
-        nextDecisionPolicy,
-      ] =
-        await Promise.all([
+      const [nextSources, nextCompanies, nextConnectors, nextDecisionPolicy] = await Promise.all([
         api.listSources(),
         api.listCompanies(),
-        api.getComparison(),
         api.listEnrichmentConnectors(),
-        api.listMergeReviews("pending"),
-        api.listIngestionJobs(50),
         api.getDecisionPolicy(),
       ]);
+      const nextSelectedCompanyId = resolveSelectedCompanyId(selectedCompanyId, nextCompanies);
       setSources(nextSources);
       setCompanies(nextCompanies);
-      setComparison(nextComparison);
       setConnectors(nextConnectors);
-      setMergeReviews(nextMergeReviews);
-      setIngestionJobs(nextJobs);
       setDecisionPolicy(nextDecisionPolicy);
-      if (!selectedCompanyId && nextCompanies.length > 0) {
-        setSelectedCompanyId(nextCompanies[0].id);
-      }
+      setSelectedCompanyId(nextSelectedCompanyId);
+      return { selectedCompanyId: nextSelectedCompanyId };
     } catch (err) {
       setError(err.message || "Failed to load data.");
+      return null;
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   };
 
-  const loadCompanyDetail = async (companyId) => {
+  const loadComparison = async ({ showLoading = true } = {}) => {
+    if (showLoading) {
+      setLoading(true);
+    }
+    setError("");
+    try {
+      const nextComparison = await api.getComparison();
+      setComparison(nextComparison);
+      return nextComparison;
+    } catch (err) {
+      setError(err.message || "Failed to load comparison.");
+      return null;
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
+  };
+
+  const loadOps = async ({ showLoading = true } = {}) => {
+    if (showLoading) {
+      setLoading(true);
+    }
+    setError("");
+    try {
+      const [nextMergeReviews, nextJobs] = await Promise.all([
+        api.listMergeReviews("pending"),
+        api.listIngestionJobs(50),
+      ]);
+      setMergeReviews(nextMergeReviews);
+      setIngestionJobs(nextJobs);
+      setOpsLoaded(true);
+      return true;
+    } catch (err) {
+      setError(err.message || "Failed to load operations.");
+      return false;
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
+  };
+
+  const loadCompanyDetail = async (companyId, { showLoading = false } = {}) => {
     if (!companyId) {
       setSelectedCompany(null);
-      return;
+      return null;
+    }
+    if (showLoading) {
+      setLoading(true);
     }
     try {
       const detail = await api.getCompany(companyId);
       setSelectedCompany(detail);
+      return detail;
     } catch (err) {
       setError(err.message || "Failed to load company detail.");
+      return null;
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
+  };
+
+  const refreshActiveViewData = async (companyId = selectedCompanyId, { showLoading = false } = {}) => {
+    if (activeView === "companies") {
+      return loadCompanyDetail(companyId, { showLoading });
+    }
+    if (activeView === "comparison") {
+      return loadComparison({ showLoading });
+    }
+    if (activeView === "ops") {
+      return loadOps({ showLoading });
+    }
+    return null;
+  };
+
+  const refreshCurrentView = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const overview = await loadOverview({ showLoading: false });
+      await refreshActiveViewData(overview?.selectedCompanyId ?? selectedCompanyId, {
+        showLoading: false,
+      });
+    } catch (err) {
+      setError(err.message || "Failed to load data.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -351,10 +506,26 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (selectedCompanyId) {
-      loadCompanyDetail(selectedCompanyId);
+    if (activeView !== "companies") return;
+    if (!selectedCompanyId && companies.length > 0) {
+      setSelectedCompanyId(companies[0].id);
+      return;
     }
-  }, [selectedCompanyId]);
+    if (selectedCompanyId) {
+      loadCompanyDetail(selectedCompanyId, { showLoading: true });
+    } else {
+      setSelectedCompany(null);
+    }
+  }, [activeView, selectedCompanyId, companies]);
+
+  useEffect(() => {
+    if (activeView === "comparison" && !comparison) {
+      loadComparison();
+    }
+    if (activeView === "ops" && !opsLoaded) {
+      loadOps();
+    }
+  }, [activeView, comparison, opsLoaded]);
 
   const totals = useMemo(() => {
     const featureTotal = companies.reduce((sum, company) => sum + company.features.length, 0);
@@ -399,6 +570,35 @@ function App() {
       return companyName.includes(query) || domain.includes(query);
     });
   }, [companies, companyQuery]);
+
+  const filteredSources = useMemo(() => {
+    const query = sourceQuery.trim().toLowerCase();
+    if (!query) {
+      return sources;
+    }
+    return sources.filter((source) => {
+      const haystack = [
+        source.url,
+        source.domain,
+        source.company_name,
+        source.source_type,
+        source.status,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [sources, sourceQuery]);
+
+  const visibleSources = useMemo(() => filteredSources.slice(0, MAX_SOURCE_ROWS), [filteredSources]);
+  const hiddenSourceCount = Math.max(0, filteredSources.length - visibleSources.length);
+
+  const visibleCompanies = useMemo(
+    () => filteredCompanies.slice(0, MAX_COMPANY_CARDS),
+    [filteredCompanies],
+  );
+  const hiddenCompanyCount = Math.max(0, filteredCompanies.length - visibleCompanies.length);
 
   const selectedSourceTypeCounts = useMemo(() => {
     const counts = {};
@@ -449,6 +649,29 @@ function App() {
     };
   }, [comparison]);
 
+  const visibleComparisonRows = useMemo(
+    () => comparisonSummary.competitors.slice(0, MAX_COMPARISON_ROWS),
+    [comparisonSummary.competitors],
+  );
+  const hiddenComparisonCount = Math.max(
+    0,
+    comparisonSummary.competitors.length - visibleComparisonRows.length,
+  );
+
+  const selectedEvidenceSources = useMemo(
+    () => (selectedCompany?.sources || []).slice(0, MAX_EVIDENCE_SOURCES),
+    [selectedCompany],
+  );
+  const hiddenEvidenceSourceCount = Math.max(
+    0,
+    (selectedCompany?.sources?.length || 0) - selectedEvidenceSources.length,
+  );
+  const selectedTheme = useMemo(
+    () => THEME_OPTIONS.find((theme) => theme.id === themeMode) || THEME_OPTIONS[0],
+    [themeMode],
+  );
+  const SelectedThemeIcon = selectedTheme.icon;
+
   const addSource = async (event) => {
     event.preventDefault();
     setError("");
@@ -456,7 +679,9 @@ function App() {
     try {
       await api.addSource({ url: urlInput.trim() });
       setUrlInput("");
-      await loadOverview();
+      setComparison(null);
+      setOpsLoaded(false);
+      await refreshCurrentView();
     } catch (err) {
       setError(err.message || "Failed to add URL.");
     } finally {
@@ -474,10 +699,9 @@ function App() {
         refreshMarketSignals: false,
       });
       setAutoDiscoverResult(result);
-      await loadOverview();
-      if (selectedCompanyId) {
-        await loadCompanyDetail(selectedCompanyId);
-      }
+      setComparison(null);
+      setOpsLoaded(false);
+      await refreshCurrentView();
     } catch (err) {
       setError(err.message || "Failed to auto-discover competitors.");
     } finally {
@@ -490,10 +714,9 @@ function App() {
     setError("");
     try {
       await api.rescrapeSource(sourceId);
-      await loadOverview();
-      if (selectedCompanyId) {
-        await loadCompanyDetail(selectedCompanyId);
-      }
+      setComparison(null);
+      setOpsLoaded(false);
+      await refreshCurrentView();
     } catch (err) {
       setError(err.message || "Failed to re-scrape source.");
     } finally {
@@ -506,10 +729,9 @@ function App() {
     setError("");
     try {
       await api.deleteSource(sourceId);
-      await loadOverview();
-      if (selectedCompanyId) {
-        await loadCompanyDetail(selectedCompanyId);
-      }
+      setComparison(null);
+      setOpsLoaded(false);
+      await refreshCurrentView();
     } catch (err) {
       setError(err.message || "Failed to delete source.");
     } finally {
@@ -523,7 +745,9 @@ function App() {
     try {
       const detail = await api.refreshCompanyNews(companyId);
       setSelectedCompany(detail);
-      await loadOverview();
+      setComparison(null);
+      setOpsLoaded(false);
+      await loadOverview({ showLoading: false });
     } catch (err) {
       setError(err.message || "Failed to refresh company news.");
     } finally {
@@ -537,7 +761,9 @@ function App() {
     try {
       const detail = await api.refreshCompanyEnrichment(companyId);
       setSelectedCompany(detail);
-      await loadOverview();
+      setComparison(null);
+      setOpsLoaded(false);
+      await loadOverview({ showLoading: false });
     } catch (err) {
       setError(err.message || "Failed to refresh source enrichment.");
     } finally {
@@ -550,10 +776,9 @@ function App() {
     setError("");
     try {
       await api.approveMergeReview(reviewId, {});
-      await loadOverview();
-      if (selectedCompanyId) {
-        await loadCompanyDetail(selectedCompanyId);
-      }
+      setComparison(null);
+      setOpsLoaded(false);
+      await refreshCurrentView();
     } catch (err) {
       setError(err.message || "Failed to approve merge review.");
     } finally {
@@ -566,7 +791,8 @@ function App() {
     setError("");
     try {
       await api.rejectMergeReview(reviewId, {});
-      await loadOverview();
+      setOpsLoaded(false);
+      await refreshCurrentView();
     } catch (err) {
       setError(err.message || "Failed to reject merge review.");
     } finally {
@@ -579,10 +805,9 @@ function App() {
     setError("");
     try {
       await api.runIngestionCycle();
-      await loadOverview();
-      if (selectedCompanyId) {
-        await loadCompanyDetail(selectedCompanyId);
-      }
+      setComparison(null);
+      setOpsLoaded(false);
+      await refreshCurrentView();
     } catch (err) {
       setError(err.message || "Failed to run ingestion cycle.");
     } finally {
@@ -592,7 +817,6 @@ function App() {
 
   return (
     <div className="app-shell">
-      <LiquidGlassFilterDefs />
       <header className="header">
         <div>
           <span className="hero-kicker">Concentric AI</span>
@@ -603,26 +827,24 @@ function App() {
           </p>
         </div>
         <div className="header-actions">
-          <div className="theme-switcher" role="radiogroup" aria-label="Theme selector">
-            {THEME_OPTIONS.map((theme) => {
-              const Icon = theme.icon;
-              const isActive = themeMode === theme.id;
-              return (
-                <button
-                  key={theme.id}
-                  type="button"
-                  className={`theme-option ${isActive ? "active" : ""}`}
-                  onClick={() => setThemeMode(theme.id)}
-                  aria-pressed={isActive}
-                  title={`${theme.label} theme`}
-                >
-                  <Icon size={14} />
-                  <span>{theme.label}</span>
-                </button>
-              );
-            })}
+          <div className="theme-switcher">
+            <SelectedThemeIcon className="theme-select-icon" size={15} aria-hidden="true" />
+            <select
+              className="theme-select"
+              value={themeMode}
+              onChange={(event) => setThemeMode(event.target.value)}
+              aria-label="Theme selector"
+              title="Theme selector"
+            >
+              {THEME_OPTIONS.map((theme) => (
+                <option key={theme.id} value={theme.id}>
+                  {theme.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="theme-select-chevron" size={15} aria-hidden="true" />
           </div>
-          <button className="icon-button" onClick={loadOverview} title="Refresh everything">
+          <button className="icon-button" onClick={refreshCurrentView} title="Refresh current view">
             <RefreshCw size={16} />
             Refresh
           </button>
@@ -708,6 +930,18 @@ function App() {
             ))}
           </div>
 
+          <div className="table-filter-bar">
+            <input
+              className="source-search"
+              value={sourceQuery}
+              onChange={(event) => setSourceQuery(event.target.value)}
+              placeholder="Filter sources by URL, company, type, or status"
+            />
+            <span className="muted">
+              {filteredSources.length} of {sources.length} URLs
+            </span>
+          </div>
+
           <table className="data-table">
             <thead>
               <tr>
@@ -722,12 +956,12 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {sources.length === 0 ? (
+              {filteredSources.length === 0 ? (
                 <tr>
-                  <td colSpan={8}>No source URLs yet.</td>
+                  <td colSpan={8}>{sources.length === 0 ? "No source URLs yet." : "No source URLs match this filter."}</td>
                 </tr>
               ) : (
-                sources.map((source) => (
+                visibleSources.map((source) => (
                   <tr key={source.id}>
                     <td>
                       <a href={source.url} target="_blank" rel="noreferrer">
@@ -777,6 +1011,14 @@ function App() {
                   </tr>
                 ))
               )}
+              {hiddenSourceCount > 0 ? (
+                <tr className="table-limit-row">
+                  <td colSpan={8}>
+                    Showing first {visibleSources.length} of {filteredSources.length} matching URLs. Refine the filter
+                    for targeted inspection.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </section>
@@ -806,48 +1048,55 @@ function App() {
               {filteredCompanies.length === 0 ? (
                 <p className="muted">No companies match this filter.</p>
               ) : (
-                filteredCompanies.map((company) => (
-                  <button
-                    key={company.id}
-                    type="button"
-                    className={`company-card ${selectedCompanyId === company.id ? "active" : ""}`}
-                    onClick={() => setSelectedCompanyId(company.id)}
-                  >
-                    <div className="company-card-head">
-                      <div className="company-card-identity">
-                        <span className="company-avatar" aria-hidden="true">
-                          {(company.company_name || "?").charAt(0).toUpperCase()}
-                        </span>
-                        <div className="company-card-title">
-                          <strong>{company.company_name}</strong>
-                          <span>
-                            <Globe size={12} />
-                            <span className="company-domain-text">{company.primary_domain || "-"}</span>
+                <>
+                  {visibleCompanies.map((company) => (
+                    <button
+                      key={company.id}
+                      type="button"
+                      className={`company-card ${selectedCompanyId === company.id ? "active" : ""}`}
+                      onClick={() => setSelectedCompanyId(company.id)}
+                    >
+                      <div className="company-card-head">
+                        <div className="company-card-identity">
+                          <span className="company-avatar" aria-hidden="true">
+                            {(company.company_name || "?").charAt(0).toUpperCase()}
                           </span>
+                          <div className="company-card-title">
+                            <strong>{company.company_name}</strong>
+                            <span>
+                              <Globe size={12} />
+                              <span className="company-domain-text">{company.primary_domain || "-"}</span>
+                            </span>
+                          </div>
                         </div>
+                        <span className="company-card-score">{company.high_confidence_claim_count || 0}</span>
                       </div>
-                      <span className="company-card-score">{company.high_confidence_claim_count || 0}</span>
-                    </div>
-                    <div className="company-card-metrics">
-                      <span>
-                        <Link2 size={12} />
-                        {company.source_count} sources
-                      </span>
-                      <span>
-                        <Newspaper size={12} />
-                        {company.news_count} signals
-                      </span>
-                      <span>
-                        <Linkedin size={12} />
-                        {company.linkedin_news_count} LinkedIn
-                      </span>
-                      <span>
-                        <Database size={12} />
-                        {company.enrichment_news_count || 0} connectors
-                      </span>
-                    </div>
-                  </button>
-                ))
+                      <div className="company-card-metrics">
+                        <span>
+                          <Link2 size={12} />
+                          {company.source_count} sources
+                        </span>
+                        <span>
+                          <Newspaper size={12} />
+                          {company.news_count} signals
+                        </span>
+                        <span>
+                          <Linkedin size={12} />
+                          {company.linkedin_news_count} LinkedIn
+                        </span>
+                        <span>
+                          <Database size={12} />
+                          {company.enrichment_news_count || 0} connectors
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                  {hiddenCompanyCount > 0 ? (
+                    <p className="list-limit-note muted">
+                      Showing first {visibleCompanies.length} matches. Search by name or domain to narrow the list.
+                    </p>
+                  ) : null}
+                </>
               )}
             </div>
           </aside>
@@ -1145,7 +1394,7 @@ function App() {
                         <td colSpan={5}>No linked sources yet.</td>
                       </tr>
                     ) : (
-                      selectedCompany.sources.map((source) => (
+                      selectedEvidenceSources.map((source) => (
                         <tr key={source.id}>
                           <td>
                             <a href={source.url} target="_blank" rel="noreferrer">
@@ -1159,6 +1408,14 @@ function App() {
                         </tr>
                       ))
                     )}
+                    {hiddenEvidenceSourceCount > 0 ? (
+                      <tr className="table-limit-row">
+                        <td colSpan={5}>
+                          Showing first {selectedEvidenceSources.length} of {selectedCompany.sources.length} evidence
+                          sources.
+                        </td>
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
 
@@ -1170,9 +1427,10 @@ function App() {
                     selectedCompany.news.map((item) => (
                       <a
                         key={item.id}
-                        href={item.article_url}
+                        href={articleHref(item)}
                         target="_blank"
                         rel="noreferrer"
+                        title={articleLinkTitle(item)}
                         className="news-row"
                       >
                         <div>
@@ -1262,12 +1520,12 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              {comparison.competitors.length === 0 ? (
+              {comparisonSummary.competitors.length === 0 ? (
                 <tr>
                   <td colSpan={6}>No competitor profiles yet.</td>
                 </tr>
               ) : (
-                comparison.competitors.map((row) => {
+                visibleComparisonRows.map((row) => {
                   const scorePercent = comparisonSummary.maxGapScore
                     ? Math.max(4, Math.round((row.gap_score / comparisonSummary.maxGapScore) * 100))
                     : 0;
@@ -1332,9 +1590,10 @@ function App() {
                             return (
                               <a
                                 key={`${row.company_id}-${news.id}`}
-                                href={news.article_url}
+                                href={articleHref(news)}
                                 target="_blank"
                                 rel="noreferrer"
+                                title={articleLinkTitle(news)}
                                 className="news-mini-link"
                               >
                                 <span>{title.text}</span>
@@ -1349,6 +1608,14 @@ function App() {
                   );
                 })
               )}
+              {hiddenComparisonCount > 0 ? (
+                <tr className="table-limit-row">
+                  <td colSpan={6}>
+                    Showing first {visibleComparisonRows.length} of {comparisonSummary.competitors.length} ranked
+                    competitors.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </section>
@@ -1426,7 +1693,7 @@ function App() {
           </table>
 
           <h3>Recent Ingestion Jobs</h3>
-          <table className="data-table compact">
+          <table className="data-table compact ops-jobs-table">
             <thead>
               <tr>
                 <th>Time</th>
@@ -1452,7 +1719,9 @@ function App() {
                     <td>
                       <span className={`status ${job.status}`}>{job.status}</span>
                     </td>
-                    <td>{job.error_message || job.result_summary || "-"}</td>
+                    <td>
+                      <JobResultCell job={job} connectorNames={connectorNames} />
+                    </td>
                   </tr>
                 ))
               )}

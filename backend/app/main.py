@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import Select, func, select
+from fastapi.responses import RedirectResponse
+from sqlalchemy import Select, delete, func, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, selectinload
 
+from .ai_enrichment import extract_ai_signals
 from .database import Base, SessionLocal, engine, get_db
 from .discovery import discover_competitor_candidates, list_competitor_catalog
 from .enrichment import fetch_enrichment_news, list_enrichment_connectors
@@ -54,6 +58,7 @@ from .scraper import (
     infer_company_name_from_domain,
     normalize_company_key,
     normalize_url,
+    resolve_google_news_article_url,
     scrape_source_url,
 )
 
@@ -82,6 +87,19 @@ SOURCE_TIER_BY_TYPE: dict[str, float] = {
 }
 SOURCE_TIER_ENRICHMENT = 0.64
 SOURCE_TIER_DEFAULT = 0.6
+MIN_NEWS_RELEVANCE_SCORE = 0.6
+GENERIC_NEWS_IDENTITY_TERMS: tuple[str, ...] = (
+    "ai",
+    "app",
+    "cloud",
+    "cyber",
+    "data",
+    "labs",
+    "security",
+    "software",
+    "tech",
+    "technologies",
+)
 PLACEHOLDER_COMPANY_MARKERS: tuple[str, ...] = (
     "access denied",
     "attention required",
@@ -116,6 +134,7 @@ _scheduler_stop_event = threading.Event()
 _scheduler_thread: threading.Thread | None = None
 _scheduler_lock = threading.Lock()
 _refresh_cycle_lock = threading.Lock()
+_write_lock = threading.RLock()
 
 app = FastAPI(title="Concentric Competitive Intelligence API", version="0.3.0")
 
@@ -401,9 +420,26 @@ def _serialize_ingestion_job(job: IngestionJob) -> IngestionJobRead:
     )
 
 
-def _serialize_company_summary(company: CompanyProfile) -> CompanySummaryRead:
-    linkedin_url = _resolve_company_linkedin_url(company)
+def _serialize_company_summary(
+    company: CompanyProfile,
+    *,
+    source_urls: list[str] | None = None,
+    news_source_counts: dict[str, int] | None = None,
+    high_confidence_claim_count: int | None = None,
+) -> CompanySummaryRead:
+    linkedin_url = _resolve_company_linkedin_url(company, source_urls=source_urls)
     display_company_name = _safe_company_name(company.company_name, company.primary_domain)
+    resolved_news_source_counts = (
+        dict(sorted(news_source_counts.items()))
+        if news_source_counts is not None
+        else _company_news_source_counts(company)
+    )
+    resolved_high_confidence_claim_count = (
+        high_confidence_claim_count
+        if high_confidence_claim_count is not None
+        else _count_high_confidence_claims(company)
+    )
+    resolved_news_count = sum(resolved_news_source_counts.values())
     return CompanySummaryRead(
         id=company.id,
         company_name=display_company_name,
@@ -412,11 +448,13 @@ def _serialize_company_summary(company: CompanyProfile) -> CompanySummaryRead:
         linkedin_url=linkedin_url,
         description=company.description,
         source_count=company.source_count,
-        news_count=company.news_count,
-        linkedin_news_count=_count_company_news(company, source="linkedin_news_rss"),
-        enrichment_news_count=_count_company_news_prefix(company, prefix="enrichment:"),
-        high_confidence_claim_count=_count_high_confidence_claims(company),
-        news_source_counts=_company_news_source_counts(company),
+        news_count=resolved_news_count,
+        linkedin_news_count=resolved_news_source_counts.get("linkedin_news_rss", 0),
+        enrichment_news_count=sum(
+            count for source, count in resolved_news_source_counts.items() if source.startswith("enrichment:")
+        ),
+        high_confidence_claim_count=resolved_high_confidence_claim_count,
+        news_source_counts=resolved_news_source_counts,
         last_refreshed_at=company.last_refreshed_at,
         features=_load_features(company.feature_set_json),
         tools=_load_tools(company.tool_set_json),
@@ -449,6 +487,28 @@ def _dedupe_tool_hits(items: list[ToolHit]) -> list[ToolSignal]:
     return result
 
 
+def _apply_ai_signal_enrichment(scrape: Any) -> None:
+    ai_signals = extract_ai_signals(scrape)
+    if ai_signals is None:
+        return
+
+    if ai_signals.features:
+        scrape.detected_features.extend(
+            FeatureHit(name=item.name, category=item.category)
+            for item in ai_signals.features
+        )
+    if ai_signals.tools:
+        scrape.detected_tools.extend(
+            ToolHit(name=item.name, category=item.category)
+            for item in ai_signals.tools
+        )
+    if ai_signals.summary and not scrape.summary:
+        scrape.summary = ai_signals.summary
+
+    if ai_signals.features or ai_signals.tools:
+        scrape.confidence = round(min(max(scrape.confidence, scrape.confidence + 0.05), 0.99), 2)
+
+
 def _merge_feature_sets(*groups: list[FeatureSignal]) -> list[FeatureSignal]:
     merged: dict[str, FeatureSignal] = {}
     for group in groups:
@@ -472,7 +532,7 @@ def _merge_tool_sets(*groups: list[ToolSignal]) -> list[ToolSignal]:
 def _count_company_news(company: CompanyProfile, source: str) -> int:
     count = 0
     for item in company.news_items:
-        if item.source == source:
+        if item.source == source and _is_relevant_company_news(company=company, item=item):
             count += 1
     return count
 
@@ -480,7 +540,7 @@ def _count_company_news(company: CompanyProfile, source: str) -> int:
 def _count_company_news_prefix(company: CompanyProfile, prefix: str) -> int:
     count = 0
     for item in company.news_items:
-        if item.source.startswith(prefix):
+        if item.source.startswith(prefix) and _is_relevant_company_news(company=company, item=item):
             count += 1
     return count
 
@@ -488,8 +548,154 @@ def _count_company_news_prefix(company: CompanyProfile, prefix: str) -> int:
 def _company_news_source_counts(company: CompanyProfile) -> dict[str, int]:
     counts: dict[str, int] = {}
     for item in company.news_items:
+        if not _is_relevant_company_news(company=company, item=item):
+            continue
         counts[item.source] = counts.get(item.source, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def _load_company_source_urls(db: Session, company_ids: list[int]) -> dict[int, list[str]]:
+    if not company_ids:
+        return {}
+    rows = db.execute(
+        select(CompanySource.company_id, CompanySource.source_url)
+        .where(CompanySource.company_id.in_(company_ids))
+        .order_by(CompanySource.updated_at.desc())
+    ).all()
+    source_urls: dict[int, list[str]] = {}
+    for company_id, source_url in rows:
+        if company_id is None:
+            continue
+        source_urls.setdefault(company_id, []).append(source_url)
+    return source_urls
+
+
+def _load_company_news_source_counts(db: Session, companies: list[CompanyProfile]) -> dict[int, dict[str, int]]:
+    company_ids = [company.id for company in companies]
+    if not company_ids:
+        return {}
+    companies_by_id = {company.id: company for company in companies}
+    rows = db.execute(
+        select(CompanyNews)
+        .where(CompanyNews.company_id.in_(company_ids))
+    ).all()
+    counts_by_company: dict[int, dict[str, int]] = {}
+    for (item,) in rows:
+        company = companies_by_id.get(item.company_id)
+        if company is None or not _is_relevant_company_news(company=company, item=item):
+            continue
+        counts = counts_by_company.setdefault(item.company_id, {})
+        counts[item.source] = counts.get(item.source, 0) + 1
+    return {company_id: dict(sorted(counts.items())) for company_id, counts in counts_by_company.items()}
+
+
+def _normalize_news_match_text(value: str | None) -> str:
+    if not value:
+        return ""
+    normalized = re.sub(r"[^a-z0-9.]+", " ", value.lower())
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _company_news_identity_terms(company: CompanyProfile) -> list[str]:
+    terms: list[str] = []
+    normalized_name = _normalize_news_match_text(company.company_name)
+    if normalized_name:
+        terms.append(normalized_name)
+        terms.extend(
+            token
+            for token in normalized_name.split()
+            if len(token) >= 4 and token not in GENERIC_NEWS_IDENTITY_TERMS
+        )
+
+    domain = _normalize_news_match_text((company.primary_domain or "").removeprefix("www."))
+    if domain:
+        terms.append(domain)
+        domain_root = domain.split(".", 1)[0]
+        if len(domain_root) >= 4 and domain_root not in GENERIC_NEWS_IDENTITY_TERMS:
+            terms.append(domain_root)
+
+    return list(dict.fromkeys(term for term in terms if term))
+
+
+def _news_text_contains_term(text: str, term: str) -> bool:
+    if not text or not term:
+        return False
+    if " " in term or "." in term:
+        return term in text
+    return re.search(rf"\b{re.escape(term)}\b", text) is not None
+
+
+def _direct_article_url_text(article_url: str) -> str:
+    article_domain = extract_domain(article_url)
+    if article_domain in {"news.google.com", "www.news.google.com"}:
+        return ""
+    return _normalize_news_match_text(article_url)
+
+
+def _news_item_relevance_score(company: CompanyProfile, item: Any) -> float:
+    identity_terms = _company_news_identity_terms(company)
+    if not identity_terms:
+        return 0.0
+
+    title_summary = _normalize_news_match_text(f"{item.title} {item.summary or ''}")
+    publisher = _normalize_news_match_text(item.publisher or "")
+    direct_url = _direct_article_url_text(item.article_url or "")
+
+    if any(_news_text_contains_term(title_summary, term) for term in identity_terms):
+        return 0.95
+    if any(_news_text_contains_term(publisher, term) for term in identity_terms):
+        return 0.75
+    if any(_news_text_contains_term(direct_url, term) for term in identity_terms):
+        return 0.65
+    return 0.0
+
+
+def _is_relevant_company_news(company: CompanyProfile, item: Any) -> bool:
+    return _news_item_relevance_score(company=company, item=item) >= MIN_NEWS_RELEVANCE_SCORE
+
+
+def _relevant_company_news_items(company: CompanyProfile) -> list[CompanyNews]:
+    return [
+        item
+        for item in company.news_items
+        if _is_relevant_company_news(company=company, item=item)
+    ]
+
+
+def _prune_irrelevant_news_items(db: Session, company: CompanyProfile) -> int:
+    stale_ids = [
+        item.id
+        for item in list(company.news_items)
+        if not _is_relevant_company_news(company=company, item=item)
+    ]
+    if not stale_ids:
+        return 0
+
+    result = db.execute(
+        delete(CompanyNews)
+        .where(
+            CompanyNews.company_id == company.id,
+            CompanyNews.id.in_(stale_ids),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if "news_items" in company.__dict__:
+        db.expire(company, ["news_items"])
+    return int(result.rowcount or 0)
+
+
+def _load_high_confidence_claim_counts(db: Session, company_ids: list[int]) -> dict[int, int]:
+    if not company_ids:
+        return {}
+    rows = db.execute(
+        select(CompanyClaim.company_id, func.count(CompanyClaim.id))
+        .where(
+            CompanyClaim.company_id.in_(company_ids),
+            CompanyClaim.confidence >= HIGH_CONFIDENCE_THRESHOLD,
+        )
+        .group_by(CompanyClaim.company_id)
+    ).all()
+    return {company_id: int(count) for company_id, count in rows}
 
 
 def _count_high_confidence_claims(company: CompanyProfile) -> int:
@@ -686,7 +892,6 @@ def _run_company_refresh_job(
         started_at=_now(),
     )
     db.add(job)
-    db.flush()
 
     try:
         news_counts: dict[str, int] = {}
@@ -725,8 +930,9 @@ def _run_full_refresh_cycle(run_mode: str = "scheduled") -> int:
                 )
             ).all()
             for company in companies:
-                _run_company_refresh_job(db=db, company=company, run_mode=run_mode)
-                db.commit()
+                with _write_lock:
+                    _run_company_refresh_job(db=db, company=company, run_mode=run_mode)
+                    db.commit()
                 refreshed += 1
     finally:
         _refresh_cycle_lock.release()
@@ -767,9 +973,10 @@ def _stop_scheduler() -> None:
         _scheduler_thread = None
 
 
-def _resolve_company_linkedin_url(company: CompanyProfile) -> str | None:
-    for source in company.sources:
-        explicit = extract_linkedin_company_url(source.source_url)
+def _resolve_company_linkedin_url(company: CompanyProfile, source_urls: list[str] | None = None) -> str | None:
+    urls = source_urls if source_urls is not None else [source.source_url for source in company.sources]
+    for source_url in urls:
+        explicit = extract_linkedin_company_url(source_url)
         if explicit:
             return explicit
     lookup_name = _safe_company_name(company.company_name, company.primary_domain)
@@ -903,12 +1110,24 @@ def _recompute_company_profile(db: Session, company: CompanyProfile) -> None:
 def _add_news_items(db: Session, company: CompanyProfile, items: list[Any], source: str) -> int:
     added = 0
     for item in items:
-        article_url = item.article_url.strip()
-        if not article_url:
+        original_article_url = item.article_url.strip()
+        if not original_article_url:
+            continue
+        article_url = resolve_google_news_article_url(original_article_url) or original_article_url
+        if article_url != original_article_url:
+            item.article_url = article_url
+        if not _is_relevant_company_news(company=company, item=item):
             continue
         exists = db.scalar(select(CompanyNews).where(CompanyNews.article_url == article_url))
         if exists:
             continue
+        if article_url != original_article_url:
+            existing_google_row = db.scalar(
+                select(CompanyNews).where(CompanyNews.article_url == original_article_url)
+            )
+            if existing_google_row:
+                existing_google_row.article_url = article_url
+                continue
         db.add(
             CompanyNews(
                 company_id=company.id,
@@ -925,6 +1144,7 @@ def _add_news_items(db: Session, company: CompanyProfile, items: list[Any], sour
 
 
 def _update_company_news_count(db: Session, company: CompanyProfile) -> None:
+    _prune_irrelevant_news_items(db=db, company=company)
     db.flush()
     company.news_count = db.scalar(select(func.count(CompanyNews.id)).where(CompanyNews.company_id == company.id)) or 0
     company.last_refreshed_at = _now()
@@ -1050,6 +1270,8 @@ def _scrape_and_merge_source(
             _refresh_company_enrichment(db, company)
         return source
 
+    _apply_ai_signal_enrichment(scrape)
+
     final_url = normalize_url(scrape.final_url) or source.source_url
     duplicate = db.scalar(
         select(CompanySource).where(
@@ -1111,31 +1333,32 @@ def list_competitive_urls(db: Session = Depends(get_db)) -> list[CompetitiveURLR
 
 @app.post("/competitive-urls", response_model=CompetitiveURLRead, status_code=status.HTTP_201_CREATED)
 def add_competitive_url(payload: CompetitiveURLCreate, db: Session = Depends(get_db)) -> CompetitiveURLRead:
-    normalized = normalize_url(payload.url)
-    if not normalized:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL is required")
-    domain = extract_domain(normalized)
-    if not domain:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
+    with _write_lock:
+        normalized = normalize_url(payload.url)
+        if not normalized:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL is required")
+        domain = extract_domain(normalized)
+        if not domain:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid URL")
 
-    existing = db.scalar(select(CompanySource).where(CompanySource.source_url == normalized))
-    if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="URL already exists")
+        existing = db.scalar(select(CompanySource).where(CompanySource.source_url == normalized))
+        if existing:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="URL already exists")
 
-    source = CompanySource(
-        source_url=normalized,
-        source_domain=domain,
-        source_type="website",
-        confidence=0.0,
-        scraped_at=_now(),
-    )
-    db.add(source)
-    db.flush()
+        source = CompanySource(
+            source_url=normalized,
+            source_domain=domain,
+            source_type="website",
+            confidence=0.0,
+            scraped_at=_now(),
+        )
+        db.add(source)
+        db.flush()
 
-    source = _scrape_and_merge_source(db=db, source=source)
-    db.commit()
-    db.refresh(source)
-    return _serialize_source(source)
+        source = _scrape_and_merge_source(db=db, source=source)
+        db.commit()
+        db.refresh(source)
+        return _serialize_source(source)
 
 
 @app.post("/competitors/auto-discover", response_model=AutoDiscoverResponse)
@@ -1145,116 +1368,126 @@ def auto_discover_competitors(
     refresh_market_signals: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> AutoDiscoverResponse:
-    candidates = discover_competitor_candidates(max_count=max_candidates, include_news=include_news)
-    existing_sources = db.scalars(select(CompanySource)).all()
-    existing_domains = {_canonical_domain(source.source_url) for source in existing_sources}
+    with _write_lock:
+        candidates = discover_competitor_candidates(max_count=max_candidates, include_news=include_news)
+        existing_sources = db.scalars(select(CompanySource)).all()
+        existing_domains = {_canonical_domain(source.source_url) for source in existing_sources}
 
-    added_sources = 0
-    skipped_existing = 0
-    failed_sources = 0
-    urls_added: list[str] = []
-    errors: list[str] = []
+        added_sources = 0
+        skipped_existing = 0
+        failed_sources = 0
+        urls_added: list[str] = []
+        errors: list[str] = []
 
-    for candidate in candidates:
-        url = normalize_url(candidate.url)
-        if not url:
-            skipped_existing += 1
-            continue
-        domain = _canonical_domain(url)
-        if domain == _canonical_domain(BASELINE_COMPANY_URL):
-            skipped_existing += 1
-            continue
-        if domain in existing_domains:
-            skipped_existing += 1
-            continue
+        for candidate in candidates:
+            url = normalize_url(candidate.url)
+            if not url:
+                skipped_existing += 1
+                continue
+            domain = _canonical_domain(url)
+            if domain == _canonical_domain(BASELINE_COMPANY_URL):
+                skipped_existing += 1
+                continue
+            if domain in existing_domains:
+                skipped_existing += 1
+                continue
 
-        source = CompanySource(
-            source_url=url,
-            source_domain=domain,
-            source_type="discovered",
-            confidence=0.0,
-            scraped_at=_now(),
-            detected_company_name=candidate.company_name,
+            source = CompanySource(
+                source_url=url,
+                source_domain=domain,
+                source_type="discovered",
+                confidence=0.0,
+                scraped_at=_now(),
+                detected_company_name=candidate.company_name,
+            )
+            db.add(source)
+            db.flush()
+
+            created_source_id = source.id
+            source = _scrape_and_merge_source(
+                db=db,
+                source=source,
+                refresh_market_signals=refresh_market_signals,
+            )
+            existing_domains.add(domain)
+            existing_domains.add(_canonical_domain(source.source_url))
+            if source.id != created_source_id:
+                skipped_existing += 1
+                continue
+
+            urls_added.append(source.source_url)
+            if source.last_error and source.company_id is None:
+                failed_sources += 1
+                errors.append(f"{source.source_url}: {source.last_error}")
+            else:
+                added_sources += 1
+
+        db.commit()
+        return AutoDiscoverResponse(
+            candidates_considered=len(candidates),
+            added_sources=added_sources,
+            skipped_existing=skipped_existing,
+            failed_sources=failed_sources,
+            urls_added=urls_added,
+            errors=errors[:50],
         )
-        db.add(source)
-        db.flush()
-
-        created_source_id = source.id
-        source = _scrape_and_merge_source(
-            db=db,
-            source=source,
-            refresh_market_signals=refresh_market_signals,
-        )
-        existing_domains.add(domain)
-        existing_domains.add(_canonical_domain(source.source_url))
-        if source.id != created_source_id:
-            skipped_existing += 1
-            continue
-
-        urls_added.append(source.source_url)
-        if source.last_error and source.company_id is None:
-            failed_sources += 1
-            errors.append(f"{source.source_url}: {source.last_error}")
-        else:
-            added_sources += 1
-
-    db.commit()
-    return AutoDiscoverResponse(
-        candidates_considered=len(candidates),
-        added_sources=added_sources,
-        skipped_existing=skipped_existing,
-        failed_sources=failed_sources,
-        urls_added=urls_added,
-        errors=errors[:50],
-    )
 
 
 @app.post("/competitive-urls/{source_id}/rescrape", response_model=CompetitiveURLRead)
 def rescrape_competitive_url(source_id: int, db: Session = Depends(get_db)) -> CompetitiveURLRead:
-    source = db.get(CompanySource, source_id)
-    if not source:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
+    with _write_lock:
+        source = db.get(CompanySource, source_id)
+        if not source:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
 
-    source = _scrape_and_merge_source(db=db, source=source)
+        source = _scrape_and_merge_source(db=db, source=source)
 
-    db.commit()
-    db.refresh(source)
-    return _serialize_source(source)
+        db.commit()
+        db.refresh(source)
+        return _serialize_source(source)
 
 
 @app.delete("/competitive-urls/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_competitive_url(source_id: int, db: Session = Depends(get_db)) -> Response:
-    source = db.get(CompanySource, source_id)
-    if not source:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
+    with _write_lock:
+        source = db.get(CompanySource, source_id)
+        if not source:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL not found")
 
-    company_id = source.company_id
-    db.delete(source)
-    db.flush()
+        company_id = source.company_id
+        db.delete(source)
+        db.flush()
 
-    if company_id:
-        company = db.get(CompanyProfile, company_id)
-        if company:
-            _recompute_company_profile(db, company)
-            if company.source_count == 0 and company.company_key != normalize_company_key(BASELINE_COMPANY_NAME):
-                db.delete(company)
+        if company_id:
+            company = db.get(CompanyProfile, company_id)
+            if company:
+                _recompute_company_profile(db, company)
+                if company.source_count == 0 and company.company_key != normalize_company_key(BASELINE_COMPANY_NAME):
+                    db.delete(company)
 
-    db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+        db.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/companies", response_model=list[CompanySummaryRead])
 def list_companies(db: Session = Depends(get_db)) -> list[CompanySummaryRead]:
     companies = db.scalars(
         select(CompanyProfile)
-        .options(
-            selectinload(CompanyProfile.sources),
-            selectinload(CompanyProfile.news_items),
-            selectinload(CompanyProfile.claims),
-        )
         .order_by(CompanyProfile.source_count.desc(), CompanyProfile.company_name.asc())
     ).all()
-    return [_serialize_company_summary(company) for company in companies]
+    company_ids = [company.id for company in companies]
+    source_urls_by_company = _load_company_source_urls(db, company_ids)
+    news_counts_by_company = _load_company_news_source_counts(db, companies)
+    high_confidence_counts_by_company = _load_high_confidence_claim_counts(db, company_ids)
+    return [
+        _serialize_company_summary(
+            company,
+            source_urls=source_urls_by_company.get(company.id, []),
+            news_source_counts=news_counts_by_company.get(company.id, {}),
+            high_confidence_claim_count=high_confidence_counts_by_company.get(company.id, 0),
+        )
+        for company in companies
+    ]
 
 
 @app.get("/companies/{company_id}", response_model=CompanyDetailRead)
@@ -1273,7 +1506,7 @@ def get_company_detail(company_id: int, db: Session = Depends(get_db)) -> Compan
 
     sources = sorted(company.sources, key=lambda item: item.updated_at, reverse=True)
     news_items = sorted(
-        company.news_items,
+        _relevant_company_news_items(company),
         key=lambda item: item.published_at or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
     )
@@ -1302,24 +1535,26 @@ def list_company_claims(company_id: int, db: Session = Depends(get_db)) -> list[
 
 @app.post("/companies/{company_id}/refresh-news", response_model=CompanyDetailRead)
 def refresh_company_news(company_id: int, db: Session = Depends(get_db)) -> CompanyDetailRead:
-    company = db.get(CompanyProfile, company_id)
-    if not company:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    with _write_lock:
+        company = db.get(CompanyProfile, company_id)
+        if not company:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
-    _run_company_refresh_job(db=db, company=company, run_mode="manual", refresh_news=True, refresh_enrichment=False)
-    db.commit()
-    return get_company_detail(company_id=company.id, db=db)
+        _run_company_refresh_job(db=db, company=company, run_mode="manual", refresh_news=True, refresh_enrichment=False)
+        db.commit()
+        return get_company_detail(company_id=company.id, db=db)
 
 
 @app.post("/companies/{company_id}/refresh-enrichment", response_model=CompanyDetailRead)
 def refresh_company_enrichment(company_id: int, db: Session = Depends(get_db)) -> CompanyDetailRead:
-    company = db.get(CompanyProfile, company_id)
-    if not company:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    with _write_lock:
+        company = db.get(CompanyProfile, company_id)
+        if not company:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
-    _run_company_refresh_job(db=db, company=company, run_mode="manual", refresh_news=False, refresh_enrichment=True)
-    db.commit()
-    return get_company_detail(company_id=company.id, db=db)
+        _run_company_refresh_job(db=db, company=company, run_mode="manual", refresh_news=False, refresh_enrichment=True)
+        db.commit()
+        return get_company_detail(company_id=company.id, db=db)
 
 
 @app.get("/merge-reviews", response_model=list[MergeReviewRead])
@@ -1345,58 +1580,88 @@ def list_merge_reviews(
 
 @app.post("/merge-reviews/{review_id}/approve", response_model=MergeReviewRead)
 def approve_merge_review(review_id: int, payload: MergeReviewAction, db: Session = Depends(get_db)) -> MergeReviewRead:
-    review = db.scalar(
-        select(CompanyMergeReview)
-        .where(CompanyMergeReview.id == review_id)
-        .options(
-            selectinload(CompanyMergeReview.source).selectinload(CompanySource.company),
-            selectinload(CompanyMergeReview.candidate_company),
+    with _write_lock:
+        review = db.scalar(
+            select(CompanyMergeReview)
+            .where(CompanyMergeReview.id == review_id)
+            .options(
+                selectinload(CompanyMergeReview.source).selectinload(CompanySource.company),
+                selectinload(CompanyMergeReview.candidate_company),
+            )
         )
-    )
-    if not review:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merge review not found")
-    if review.status != "pending":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Merge review already resolved")
+        if not review:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merge review not found")
+        if review.status != "pending":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Merge review already resolved")
 
-    source = review.source
-    candidate = review.candidate_company
-    previous_company_id = source.company_id
+        source = review.source
+        candidate = review.candidate_company
+        previous_company_id = source.company_id
 
-    source.company_id = candidate.id
-    source.detected_company_name = candidate.company_name
-    source.last_error = None
-    _refresh_claims_from_source(db=db, company=candidate, source=source)
-    _run_company_refresh_job(db=db, company=candidate, run_mode="manual")
+        source.company_id = candidate.id
+        source.detected_company_name = candidate.company_name
+        source.last_error = None
+        _refresh_claims_from_source(db=db, company=candidate, source=source)
+        _run_company_refresh_job(db=db, company=candidate, run_mode="manual")
 
-    if previous_company_id and previous_company_id != candidate.id:
-        previous_company = db.get(CompanyProfile, previous_company_id)
-        if previous_company:
-            _recompute_company_profile(db=db, company=previous_company)
-            if previous_company.source_count == 0 and previous_company.company_key != normalize_company_key(BASELINE_COMPANY_NAME):
-                db.delete(previous_company)
+        if previous_company_id and previous_company_id != candidate.id:
+            previous_company = db.get(CompanyProfile, previous_company_id)
+            if previous_company:
+                _recompute_company_profile(db=db, company=previous_company)
+                if previous_company.source_count == 0 and previous_company.company_key != normalize_company_key(BASELINE_COMPANY_NAME):
+                    db.delete(previous_company)
 
-    review.status = "approved"
-    review.reviewer_note = payload.reviewer_note
-    review.reviewed_at = _now()
-    db.commit()
-    db.refresh(review)
-    return _serialize_merge_review(review)
+        review.status = "approved"
+        review.reviewer_note = payload.reviewer_note
+        review.reviewed_at = _now()
+        db.commit()
+        db.refresh(review)
+        return _serialize_merge_review(review)
 
 
 @app.post("/merge-reviews/{review_id}/reject", response_model=MergeReviewRead)
 def reject_merge_review(review_id: int, payload: MergeReviewAction, db: Session = Depends(get_db)) -> MergeReviewRead:
-    review = db.scalar(select(CompanyMergeReview).where(CompanyMergeReview.id == review_id))
-    if not review:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merge review not found")
-    if review.status != "pending":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Merge review already resolved")
+    with _write_lock:
+        review = db.scalar(select(CompanyMergeReview).where(CompanyMergeReview.id == review_id))
+        if not review:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Merge review not found")
+        if review.status != "pending":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Merge review already resolved")
 
-    review.status = "rejected"
-    review.reviewer_note = payload.reviewer_note
-    review.reviewed_at = _now()
-    db.commit()
-    db.refresh(review)
-    return _serialize_merge_review(review)
+        review.status = "rejected"
+        review.reviewer_note = payload.reviewer_note
+        review.reviewed_at = _now()
+        db.commit()
+        db.refresh(review)
+        return _serialize_merge_review(review)
+
+
+@app.get("/news/{news_id}/resolve")
+def resolve_news_article(news_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    news = db.get(CompanyNews, news_id)
+    if not news:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="News article not found")
+
+    article_url = news.article_url
+    if extract_domain(article_url) in {"news.google.com", "www.news.google.com"}:
+        with httpx.Client(timeout=2.5, follow_redirects=True) as client:
+            decoded_url = resolve_google_news_article_url(article_url, client=client)
+        if decoded_url:
+            with _write_lock:
+                duplicate = db.scalar(
+                    select(CompanyNews).where(
+                        CompanyNews.article_url == decoded_url,
+                        CompanyNews.id != news.id,
+                    )
+                )
+                if duplicate:
+                    db.delete(news)
+                else:
+                    news.article_url = decoded_url
+                db.commit()
+            article_url = decoded_url
+
+    return RedirectResponse(url=article_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @app.get("/ingestion-jobs", response_model=list[IngestionJobRead])
@@ -1432,9 +1697,10 @@ def get_comparison(
     baseline = _ensure_baseline_profile(db)
     if refresh_baseline:
         try:
-            _recompute_company_profile(db, baseline)
-            _refresh_company_news(db, baseline)
-            db.commit()
+            with _write_lock:
+                _recompute_company_profile(db, baseline)
+                _refresh_company_news(db, baseline)
+                db.commit()
         except OperationalError:
             # Keep comparison endpoint available even when concurrent write traffic temporarily locks SQLite.
             db.rollback()
@@ -1471,14 +1737,16 @@ def get_comparison(
         ]
         shared_features = [item for key, item in competitor_feature_map.items() if key in baseline_feature_map]
         shared_tools = [item for key, item in competitor_tool_map.items() if key in baseline_tool_map]
+        relevant_news = _relevant_company_news_items(competitor)
+        market_signal_count = len(relevant_news)
 
         feature_gap_score = round(len(competitor_only_features) * 1.8, 2)
         tool_gap_score = round(len(competitor_only_tools) * 1.2, 2)
-        market_signal_score = round(competitor.news_count * 0.15, 2)
+        market_signal_score = round(market_signal_count * 0.15, 2)
         gap_score = round(feature_gap_score + tool_gap_score + market_signal_score, 2)
 
         news = sorted(
-            competitor.news_items,
+            relevant_news,
             key=lambda item: item.published_at or datetime.min.replace(tzinfo=timezone.utc),
             reverse=True,
         )
@@ -1491,7 +1759,7 @@ def get_comparison(
                 feature_gap_score=feature_gap_score,
                 tool_gap_score=tool_gap_score,
                 market_signal_score=market_signal_score,
-                market_signal_count=competitor.news_count,
+                market_signal_count=market_signal_count,
                 shared_feature_count=len(shared_features),
                 shared_tool_count=len(shared_tools),
                 competitor_only_features=sorted(competitor_only_features, key=lambda item: (item.category, item.name)),

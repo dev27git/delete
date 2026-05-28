@@ -143,6 +143,123 @@ def test_entity_merge_news_and_comparison(client, monkeypatch) -> None:
     assert lakera_row["linkedin_url"]
 
 
+def test_market_signal_ingestion_filters_irrelevant_linkedin_posts(client, monkeypatch) -> None:
+    def fake_scrape(_: str) -> ScrapeResult:
+        return ScrapeResult(
+            http_status=200,
+            final_url="https://www.rubrik.com/",
+            source_type="website",
+            page_title="Rubrik",
+            meta_description="Rubrik cyber resilience platform",
+            headings=["Cyber Resilience"],
+            summary="Rubrik protects enterprise data.",
+            company_name="Rubrik",
+            publisher="Rubrik",
+            published_at=None,
+            detected_features=[FeatureHit(name="Data Security Posture Management", category="Security")],
+            detected_tools=[ToolHit(name="AWS", category="Cloud Infrastructure")],
+            confidence=0.9,
+        )
+
+    def fake_news(company_name: str, domain: str | None = None) -> list[NewsItem]:
+        return []
+
+    def fake_linkedin_news(company_name: str, linkedin_url: str | None = None) -> list[NewsItem]:
+        return [
+            NewsItem(
+                title=(
+                    "Every time you pause to hunt for a file across your email, chat, "
+                    "and cloud storage, you lose the flow that makes your best work possible. "
+                    "With Zia Search in Zoho Workplace, everything is one click away."
+                ),
+                article_url=(
+                    "https://news.google.com/rss/articles/"
+                    "CBMiswFBVV95cUxPUG1ZeDFxZndfTDFSdDBUYTJmMml4aDZ4NVBwUk9OOEl2SXlZcHZG"
+                ),
+                publisher="LinkedIn",
+                published_at=None,
+                summary="Zoho Workplace product update.",
+            ),
+            NewsItem(
+                title="Rubrik shares a cyber resilience update on LinkedIn",
+                article_url="https://news.google.com/rss/articles/rubrik-linkedin-update",
+                publisher="LinkedIn",
+                published_at=None,
+                summary="Rubrik product update.",
+            ),
+        ]
+
+    def fake_enrichment_news(company_name: str, domain: str | None = None) -> dict[str, list[NewsItem]]:
+        return {}
+
+    monkeypatch.setattr("app.main.scrape_source_url", fake_scrape)
+    monkeypatch.setattr("app.main.fetch_company_news", fake_news)
+    monkeypatch.setattr("app.main.fetch_linkedin_news", fake_linkedin_news)
+    monkeypatch.setattr("app.main.fetch_enrichment_news", fake_enrichment_news)
+
+    add_company_page = client.post("/competitive-urls", json={"url": "https://www.rubrik.com/"})
+    assert add_company_page.status_code == 201
+
+    detail = client.get(f"/companies/{add_company_page.json()['company_id']}")
+    assert detail.status_code == 200
+    payload = detail.json()
+    titles = [item["title"] for item in payload["news"]]
+
+    assert titles == ["Rubrik shares a cyber resilience update on LinkedIn"]
+    assert payload["news_source_counts"]["linkedin_news_rss"] == 1
+
+
+def test_google_news_resolve_redirects_to_decoded_publisher_url(client, monkeypatch) -> None:
+    def fake_scrape(_: str) -> ScrapeResult:
+        return ScrapeResult(
+            http_status=200,
+            final_url="https://www.rubrik.com/",
+            source_type="website",
+            page_title="Rubrik",
+            meta_description="Rubrik cyber resilience platform",
+            headings=["Cyber Resilience"],
+            summary="Rubrik protects enterprise data.",
+            company_name="Rubrik",
+            publisher="Rubrik",
+            published_at=None,
+            detected_features=[FeatureHit(name="Cyber Resilience", category="Resilience")],
+            detected_tools=[],
+            confidence=0.9,
+        )
+
+    google_url = "https://news.google.com/rss/articles/rubrik-update?oc=5"
+    publisher_url = "https://www.rubrik.com/news/rubrik-update"
+
+    def fake_news(company_name: str, domain: str | None = None) -> list[NewsItem]:
+        return [
+            NewsItem(
+                title="Rubrik announces a cyber resilience update",
+                article_url=google_url,
+                publisher="Rubrik",
+                published_at=None,
+                summary="Rubrik cyber resilience update.",
+            )
+        ]
+
+    monkeypatch.setattr("app.main.scrape_source_url", fake_scrape)
+    monkeypatch.setattr("app.main.fetch_company_news", fake_news)
+    monkeypatch.setattr("app.main.fetch_linkedin_news", lambda company_name, linkedin_url=None: [])
+    monkeypatch.setattr("app.main.fetch_enrichment_news", lambda company_name, domain=None: {})
+    monkeypatch.setattr("app.main.resolve_google_news_article_url", lambda article_url: publisher_url)
+
+    add_company_page = client.post("/competitive-urls", json={"url": "https://www.rubrik.com/"})
+    assert add_company_page.status_code == 201
+    detail = client.get(f"/companies/{add_company_page.json()['company_id']}")
+    news_id = detail.json()["news"][0]["id"]
+
+    response = client.get(f"/news/{news_id}/resolve", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == publisher_url
+
+    refreshed = client.get(f"/companies/{add_company_page.json()['company_id']}")
+    assert refreshed.json()["news"][0]["article_url"] == publisher_url
+
+
 def test_claims_and_ingestion_jobs(client, monkeypatch) -> None:
     scrape_responses = [
         ScrapeResult(

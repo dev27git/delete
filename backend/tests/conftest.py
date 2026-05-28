@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 TEST_DB = Path(__file__).resolve().parent / "test.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB.as_posix()}"
+os.environ.setdefault("AI_SIGNAL_EXTRACTION_ENABLED", "0")
 
 from app.database import Base, engine  # noqa: E402
 from app.main import app  # noqa: E402

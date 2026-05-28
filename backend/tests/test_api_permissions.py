@@ -93,6 +93,10 @@ def test_enrichment_connectors_are_listed(client) -> None:
     connector_ids = {item["id"] for item in response.json()}
     assert "techcrunch_ai" in connector_ids
     assert "owasp_genai_security" in connector_ids
+    assert "cisa_ai_security" in connector_ids
+    assert "google_security_blog" in connector_ids
+    assert "snyk_ai_security" in connector_ids
+    assert "venturebeat_ai" in connector_ids
 
 
 def test_competitor_catalog_is_listed(client) -> None:

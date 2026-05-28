@@ -59,30 +59,30 @@
 }
 
 :root[data-theme="heritage"] {
-  --bg-0: #17120d;
-  --bg-1: #211a13;
-  --bg-2: #2b2218;
-  --bg-glow-a: rgb(209 170 109 / 14%);
-  --bg-glow-b: rgb(134 102 63 / 16%);
-  --bg-glow-c: rgb(95 74 48 / 14%);
-  --surface-0: rgb(28 22 16 / 90%);
-  --surface-1: rgb(36 29 21 / 95%);
-  --surface-2: rgb(44 35 25 / 92%);
+  --bg-0: #11171a;
+  --bg-1: #151d20;
+  --bg-2: #1b211d;
+  --bg-glow-a: rgb(45 212 191 / 10%);
+  --bg-glow-b: rgb(214 164 95 / 13%);
+  --bg-glow-c: rgb(154 167 217 / 8%);
+  --surface-0: rgb(23 31 31 / 92%);
+  --surface-1: rgb(29 38 36 / 96%);
+  --surface-2: rgb(34 43 39 / 92%);
   --ink-900: #f3e5c9;
-  --ink-700: #d6c4a4;
-  --ink-500: #b39d7f;
-  --line-0: #64533e;
-  --line-1: #4d402f;
-  --line-2: #8b7655;
-  --theme-shadow: 0 18px 44px rgb(10 8 5 / 46%);
-  --theme-glow: 0 0 0 1px rgb(190 157 111 / 16%) inset;
-  --accent-cyan: #d7b57b;
-  --accent-teal: #b89c67;
-  --accent-mint: #d1bb93;
-  --accent-amber: #e6c18a;
-  --accent-indigo: #baa278;
-  --accent-fuchsia: #d8b487;
-  --accent-lime: #d4b986;
+  --ink-700: #d9ceb8;
+  --ink-500: #aeb9aa;
+  --line-0: #56675e;
+  --line-1: #394943;
+  --line-2: #8a9b76;
+  --theme-shadow: 0 18px 44px rgb(4 12 12 / 44%);
+  --theme-glow: 0 0 0 1px rgb(214 164 95 / 14%) inset;
+  --accent-cyan: #8ab8a8;
+  --accent-teal: #2dd4bf;
+  --accent-mint: #9fbd85;
+  --accent-amber: #d6a45f;
+  --accent-indigo: #9aa7d9;
+  --accent-fuchsia: #c58b92;
+  --accent-lime: #b8c772;
 }
 
 :root[data-theme="liquid"] {
@@ -139,6 +139,34 @@
   --accent-lime: #6a9a2c;
 }
 
+:root[data-theme="warm-frosted"] {
+  --bg-0: #fff2ed;
+  --bg-1: #fff8f1;
+  --bg-2: #edf8f4;
+  --bg-glow-a: rgb(244 114 88 / 18%);
+  --bg-glow-b: rgb(245 158 11 / 14%);
+  --bg-glow-c: rgb(20 184 166 / 12%);
+  --surface-0: rgb(255 255 255 / 68%);
+  --surface-1: rgb(255 255 255 / 80%);
+  --surface-2: rgb(255 247 241 / 72%);
+  --ink-900: #2d2420;
+  --ink-700: #665047;
+  --ink-500: #8a6f63;
+  --line-0: #e7cfc4;
+  --line-1: #efdcd2;
+  --line-2: #d99d83;
+  --theme-shadow: 0 18px 46px rgb(91 56 42 / 13%);
+  --theme-glow: 0 0 0 1px rgb(255 255 255 / 74%) inset;
+  --accent-cyan: #0e7490;
+  --accent-teal: #0f766e;
+  --accent-mint: #2f9e83;
+  --accent-amber: #c76b26;
+  --accent-rose: #c2415b;
+  --accent-indigo: #6860b7;
+  --accent-fuchsia: #b85aa0;
+  --accent-lime: #6f8e32;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -158,7 +186,7 @@ body {
     radial-gradient(1100px 660px at 105% -22%, var(--bg-glow-b), transparent 58%),
     radial-gradient(1000px 640px at 45% 128%, var(--bg-glow-c), transparent 62%),
     linear-gradient(180deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
-  background-attachment: fixed;
+  background-attachment: scroll;
   transition: background 240ms ease, color 240ms ease;
 }
 
@@ -214,7 +242,13 @@ a:hover {
   box-shadow: var(--theme-shadow), var(--theme-glow);
   position: relative;
   overflow: hidden;
-  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.header > * {
+  position: relative;
+  z-index: 1;
 }
 
 .header::after {
@@ -226,6 +260,8 @@ a:hover {
   top: -180px;
   border-radius: 50%;
   background: radial-gradient(circle at 40% 40%, rgb(2 132 199 / 18%), transparent 68%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 .hero-kicker {
@@ -258,27 +294,62 @@ a:hover {
 
 .header-actions {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: flex-end;
   gap: 9px;
   flex-wrap: wrap;
 }
 
 .theme-switcher {
-  display: inline-flex;
+  display: inline-grid;
+  grid-template-columns: auto minmax(130px, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  padding: 4px;
+  gap: 0;
+  padding: 0 10px;
   border: 1px solid var(--line-0);
-  border-radius: 999px;
+  border-radius: 10px;
   background: linear-gradient(180deg, var(--surface-1), var(--surface-2));
   box-shadow: var(--theme-glow);
+  min-height: 40px;
+  min-width: 184px;
   max-width: 100%;
-  overflow-x: auto;
-  scrollbar-width: none;
+  position: relative;
 }
 
-.theme-switcher::-webkit-scrollbar {
-  display: none;
+.theme-select {
+  width: 100%;
+  min-height: 38px;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--ink-900);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.2;
+  padding: 0 22px 0 8px;
+}
+
+.theme-select:focus-visible {
+  outline: 2px solid rgb(2 132 199 / 22%);
+  outline-offset: 2px;
+}
+
+.theme-select option {
+  background: var(--surface-1);
+  color: var(--ink-900);
+}
+
+.theme-select-icon,
+.theme-select-chevron {
+  color: var(--accent-cyan);
+  pointer-events: none;
+}
+
+.theme-select-chevron {
+  position: absolute;
+  right: 10px;
 }
 
 .theme-option {
@@ -294,6 +365,7 @@ a:hover {
   font-size: 0.75rem;
   font-weight: 650;
   white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .theme-option:hover {
@@ -415,8 +487,9 @@ a:hover {
       rgb(2 132 199 / 8%),
       rgb(192 38 211 / 6%),
       rgb(14 165 164 / 7%)
-    );
-  backdrop-filter: blur(4px);
+  );
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .tab-bar button {
@@ -477,6 +550,8 @@ a:hover {
   animation: section-in 340ms ease both;
   position: relative;
   overflow: hidden;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .surface::before {
@@ -510,8 +585,23 @@ a:hover {
   justify-content: flex-end;
 }
 
+.table-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+
+.source-search {
+  width: min(440px, 100%);
+  min-height: 36px;
+  font-size: 0.82rem;
+}
+
 input,
-button {
+button,
+select {
   font: inherit;
 }
 
@@ -562,6 +652,11 @@ button:disabled {
   background:
     linear-gradient(180deg, rgb(255 255 255 / 94%), rgb(241 248 255 / 90%)),
     linear-gradient(120deg, rgb(79 70 229 / 7%), rgb(2 132 199 / 8%), rgb(20 184 166 / 7%));
+}
+
+.header-actions > .icon-button {
+  min-height: 40px;
+  white-space: nowrap;
 }
 
 .discovery-summary {
@@ -1515,6 +1610,71 @@ button.company-card.active {
   gap: 10px;
 }
 
+.ops-jobs-table th:nth-child(1) {
+  width: 11%;
+}
+
+.ops-jobs-table th:nth-child(2) {
+  width: 18%;
+}
+
+.ops-jobs-table th:nth-child(3),
+.ops-jobs-table th:nth-child(4),
+.ops-jobs-table th:nth-child(5) {
+  width: 10%;
+}
+
+.ops-jobs-table th:nth-child(6) {
+  width: 41%;
+}
+
+.job-result {
+  display: grid;
+  gap: 6px;
+  min-width: 240px;
+}
+
+.job-result > strong {
+  color: var(--accent-rose);
+}
+
+.job-result-metrics,
+.job-result-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.job-result-metrics span,
+.job-result-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-700);
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.job-result-metrics strong,
+.job-result-pill strong {
+  color: var(--ink-900);
+}
+
+.job-result-pill {
+  border-color: rgb(2 132 199 / 26%);
+  background: rgb(2 132 199 / 8%);
+  color: #1f5f96;
+}
+
+.job-result-note {
+  color: var(--ink-500);
+  font-size: 0.72rem;
+}
+
 .inline-link {
   display: inline-flex;
   align-items: center;
@@ -1529,6 +1689,43 @@ button.company-card.active {
 .action-row {
   display: inline-flex;
   gap: 6px;
+}
+
+.list-limit-note {
+  margin: 4px 0 0;
+  border: 1px dashed var(--line-1);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.table-limit-row td {
+  color: var(--ink-500);
+  font-size: 0.76rem;
+  background: var(--surface-2);
+}
+
+.metric-card,
+.connector-card,
+button.company-card,
+.decision-card,
+.kpi-item,
+.news-row,
+.insight-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 92px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 [data-theme="dark"] .app-shell::before {
@@ -1825,12 +2022,91 @@ button.company-card.active {
   background: #5a6881;
 }
 
+[data-theme="dark"] .job-result-pill,
+[data-theme="dark"] .job-result-metrics span {
+  border-color: #3f4c60;
+  background: rgb(158 175 202 / 10%);
+  color: #d6deee;
+}
+
+[data-theme="dark"] .job-result-metrics strong,
+[data-theme="dark"] .job-result-pill strong {
+  color: #f5f7fc;
+}
+
+/* Liquid Glass v3: consistent geometry with static glass layers for better scrolling performance. */
+:root[data-theme="liquid"] {
+  --bg-0: #f6fbff;
+  --bg-1: #eef8ff;
+  --bg-2: #eefaf7;
+  --bg-glow-a: rgb(59 130 246 / 18%);
+  --bg-glow-b: rgb(20 184 166 / 14%);
+  --bg-glow-c: rgb(168 85 247 / 10%);
+  --surface-0: rgb(255 255 255 / 74%);
+  --surface-1: rgb(255 255 255 / 86%);
+  --surface-2: rgb(244 249 255 / 76%);
+  --ink-900: #102033;
+  --ink-700: #354b63;
+  --ink-500: #66788f;
+  --line-0: rgb(191 210 226 / 70%);
+  --line-1: rgb(211 224 235 / 76%);
+  --line-2: rgb(125 177 211 / 74%);
+  --theme-shadow: 0 12px 34px rgb(36 62 92 / 13%);
+  --theme-glow: inset 0 1px 0 rgb(255 255 255 / 88%);
+  --liquid-radius-shell: 14px;
+  --liquid-radius-panel: 12px;
+  --liquid-radius-card: 8px;
+  --liquid-radius-control: 9px;
+}
+
+:root[data-theme="liquid"] body {
+  color: var(--ink-900) !important;
+  background:
+    radial-gradient(980px 620px at 7% -14%, var(--bg-glow-a), transparent 64%),
+    radial-gradient(840px 560px at 98% -8%, var(--bg-glow-b), transparent 62%),
+    radial-gradient(760px 520px at 54% 118%, var(--bg-glow-c), transparent 66%),
+    linear-gradient(180deg, var(--bg-0), var(--bg-1) 48%, var(--bg-2)) !important;
+  background-attachment: scroll !important;
+}
+
+:root[data-theme="liquid"] body::before,
+:root[data-theme="liquid"] body::after {
+  content: none !important;
+  display: none !important;
+  animation: none !important;
+  filter: none !important;
+}
+
 [data-theme="liquid"] .app-shell::before {
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 6%), transparent 18%),
-    radial-gradient(900px 480px at 18% 0%, rgb(202 220 255 / 10%), transparent 66%),
-    radial-gradient(680px 420px at 88% 8%, rgb(255 255 255 / 7%), transparent 62%);
-  mask-image: linear-gradient(180deg, rgb(0 0 0 / 72%), transparent 86%);
+    linear-gradient(rgb(255 255 255 / 28%) 1px, transparent 1px) 0 0 / 100% 32px,
+    linear-gradient(90deg, rgb(255 255 255 / 24%) 1px, transparent 1px) 0 0 / 32px 100%,
+    linear-gradient(180deg, rgb(255 255 255 / 24%), transparent 34%);
+  mask-image: linear-gradient(180deg, rgb(0 0 0 / 48%), transparent 82%);
+}
+
+[data-theme="liquid"] .header,
+[data-theme="liquid"] .theme-switcher,
+[data-theme="liquid"] .tab-bar {
+  -webkit-backdrop-filter: blur(14px) saturate(132%) !important;
+  backdrop-filter: blur(14px) saturate(132%) !important;
+}
+
+[data-theme="liquid"] .surface,
+[data-theme="liquid"] .metric-card,
+[data-theme="liquid"] .connector-card,
+[data-theme="liquid"] .insight-card,
+[data-theme="liquid"] .score-formula,
+[data-theme="liquid"] button.company-card,
+[data-theme="liquid"] .decision-card,
+[data-theme="liquid"] .kpi-item,
+[data-theme="liquid"] .news-row,
+[data-theme="liquid"] .icon-button,
+[data-theme="liquid"] input,
+[data-theme="liquid"] select,
+[data-theme="liquid"] button:not(.company-card) {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 [data-theme="liquid"] .header,
@@ -1847,837 +2123,117 @@ button.company-card.active {
 [data-theme="liquid"] .tab-bar,
 [data-theme="liquid"] .icon-button,
 [data-theme="liquid"] input {
-  backdrop-filter: blur(30px) saturate(150%);
-  -webkit-backdrop-filter: blur(30px) saturate(150%);
   position: relative;
-  isolation: isolate;
+  isolation: auto !important;
+  overflow: hidden;
+  border-color: var(--line-0) !important;
+  color: var(--ink-900) !important;
 }
 
-[data-theme="liquid"] .header::before,
-[data-theme="liquid"] .surface::before,
-[data-theme="liquid"] .metric-card::before,
-[data-theme="liquid"] .connector-card::before,
-[data-theme="liquid"] .insight-card::before,
-[data-theme="liquid"] .score-formula::before,
-[data-theme="liquid"] button.company-card::before,
-[data-theme="liquid"] .decision-card::before,
-[data-theme="liquid"] .kpi-item::before,
-[data-theme="liquid"] .news-row::before,
-[data-theme="liquid"] .theme-switcher::before,
-[data-theme="liquid"] .tab-bar::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 16%), rgb(255 255 255 / 0%) 38%),
-    linear-gradient(145deg, rgb(255 255 255 / 7%), rgb(255 255 255 / 1%) 50%, rgb(255 255 255 / 5%));
-  opacity: 0.72;
-  z-index: 0;
-}
-
-[data-theme="liquid"] .header > *,
-[data-theme="liquid"] .surface > *,
-[data-theme="liquid"] .metric-card > *,
-[data-theme="liquid"] .connector-card > *,
-[data-theme="liquid"] .insight-card > *,
-[data-theme="liquid"] .score-formula > *,
-[data-theme="liquid"] button.company-card > *,
-[data-theme="liquid"] .decision-card > *,
-[data-theme="liquid"] .kpi-item > *,
-[data-theme="liquid"] .news-row > *,
-[data-theme="liquid"] .theme-switcher > *,
-[data-theme="liquid"] .tab-bar > * {
-  position: relative;
-  z-index: 1;
-}
-
-[data-theme="liquid"] .header {
-  background:
-    linear-gradient(135deg, rgb(255 255 255 / 14%), rgb(255 255 255 / 5%)),
-    linear-gradient(160deg, rgb(16 24 36 / 78%), rgb(10 15 23 / 68%));
-  border-color: rgb(255 255 255 / 19%);
-  box-shadow:
-    0 28px 70px rgb(0 0 0 / 42%),
-    inset 0 1px 0 rgb(255 255 255 / 24%),
-    inset 0 -1px 0 rgb(255 255 255 / 7%);
-}
-
-[data-theme="liquid"] .header::after {
-  background: radial-gradient(circle at 40% 40%, rgb(255 255 255 / 16%), transparent 68%);
-}
-
-[data-theme="liquid"] .hero-kicker {
-  border-color: rgb(255 255 255 / 20%);
-  background: rgb(255 255 255 / 9%);
-  color: #e6eefb;
-}
-
-[data-theme="liquid"] .surface {
-  background:
-    linear-gradient(145deg, rgb(255 255 255 / 10%), rgb(255 255 255 / 4%)),
-    linear-gradient(160deg, rgb(15 22 33 / 74%), rgb(10 15 23 / 66%));
-  border-color: rgb(255 255 255 / 15%);
-  box-shadow:
-    0 24px 64px rgb(0 0 0 / 36%),
-    inset 0 1px 0 rgb(255 255 255 / 20%),
-    inset 0 -1px 0 rgb(255 255 255 / 6%);
-}
-
-[data-theme="liquid"] .surface::before {
-  opacity: 0.55;
-}
-
-[data-theme="liquid"] .theme-switcher {
-  border-color: rgb(255 255 255 / 17%);
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 12%), rgb(255 255 255 / 5%)),
-    rgb(12 18 27 / 52%);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 20%),
-    0 12px 26px rgb(0 0 0 / 22%);
-}
-
-[data-theme="liquid"] .theme-option {
-  color: #cbd6e7;
-}
-
-[data-theme="liquid"] .theme-option.active {
-  background: linear-gradient(180deg, rgb(255 255 255 / 22%), rgb(255 255 255 / 9%));
-  border-color: rgb(255 255 255 / 30%);
-  color: #ffffff;
-}
-
-[data-theme="liquid"] .tab-bar {
-  border-color: rgb(255 255 255 / 15%);
-  background:
-    linear-gradient(145deg, rgb(255 255 255 / 10%), rgb(255 255 255 / 4%)),
-    rgb(12 18 27 / 48%);
-}
-
-[data-theme="liquid"] .tab-bar button {
-  color: #cbd6e7;
-}
-
-[data-theme="liquid"] .tab-bar button.active {
-  border-color: rgb(255 255 255 / 28%);
-  background: linear-gradient(180deg, rgb(255 255 255 / 18%), rgb(255 255 255 / 7%));
-  color: #ffffff;
-}
-
-[data-theme="liquid"] .metric-card {
-  background:
-    linear-gradient(155deg, rgb(255 255 255 / 11%), rgb(255 255 255 / 5%)),
-    rgb(15 22 33 / 58%);
-  border-color: rgb(255 255 255 / 15%);
-}
-
-[data-theme="liquid"] .icon-button {
-  border-color: rgb(255 255 255 / 18%);
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 13%), rgb(255 255 255 / 5%)),
-    rgb(15 22 33 / 58%);
-  color: #f5f9ff;
-}
-
-[data-theme="liquid"] input {
-  border-color: rgb(255 255 255 / 16%);
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 10%), rgb(255 255 255 / 4%)),
-    rgb(10 15 23 / 55%);
-  color: #f7faff;
-}
-
-[data-theme="liquid"] input::placeholder {
-  color: #9aa8bd;
-}
-
-[data-theme="liquid"] button.company-card,
-[data-theme="liquid"] .connector-card,
-[data-theme="liquid"] .insight-card,
-[data-theme="liquid"] .score-formula,
-[data-theme="liquid"] .decision-card,
-[data-theme="liquid"] .kpi-item,
-[data-theme="liquid"] .news-row {
-  border-color: rgb(255 255 255 / 14%) !important;
-  background:
-    linear-gradient(145deg, rgb(255 255 255 / 10%), rgb(255 255 255 / 4%)),
-    rgb(13 19 29 / 58%) !important;
-  box-shadow:
-    0 14px 34px rgb(0 0 0 / 22%),
-    inset 0 1px 0 rgb(255 255 255 / 18%),
-    inset 0 -1px 0 rgb(255 255 255 / 5%);
-}
-
-[data-theme="liquid"] button.company-card strong,
-[data-theme="liquid"] .decision-card h4,
-[data-theme="liquid"] .kpi-item strong,
-[data-theme="liquid"] .news-row strong,
-[data-theme="liquid"] .insight-card strong,
-[data-theme="liquid"] .score-formula strong,
-[data-theme="liquid"] .competitor-cell > strong,
-[data-theme="liquid"] .driver-stack strong {
-  color: #f7faff;
-}
-
-[data-theme="liquid"] .company-card-title span,
-[data-theme="liquid"] .company-card-title span svg {
-  color: #b9c4d5;
-}
-
-[data-theme="liquid"] .data-table th,
-[data-theme="liquid"] .data-table td {
-  border-bottom-color: rgb(255 255 255 / 10%);
-}
-
-[data-theme="liquid"] .data-table th {
-  color: #dbe4f1;
-  background: rgb(255 255 255 / 7%);
-}
-
-[data-theme="liquid"] .data-table tbody tr:hover {
-  background: rgb(255 255 255 / 6%);
-}
-
-[data-theme="liquid"] .pill,
-[data-theme="liquid"] .company-card-metrics span,
-[data-theme="liquid"] .decision-chip-row span,
-[data-theme="liquid"] .source-breakdown span,
-[data-theme="liquid"] .competitor-meta span,
-[data-theme="liquid"] .competitor-meta a,
-[data-theme="liquid"] .driver-stack span {
-  border-color: rgb(255 255 255 / 15%);
-  background: rgb(255 255 255 / 8%);
-  color: #d6dfed;
-}
-
-[data-theme="liquid"] .pill:nth-child(4n + 1),
-[data-theme="liquid"] .company-card-metrics span:nth-child(4n + 1),
-[data-theme="liquid"] .decision-chip-row span:nth-child(4n + 1),
-[data-theme="liquid"] .source-breakdown span:nth-child(4n + 1) {
-  border-color: rgb(220 231 250 / 28%);
-  background: rgb(220 231 250 / 11%);
-  color: #e5edf9;
-}
-
-[data-theme="liquid"] .pill:nth-child(4n + 2),
-[data-theme="liquid"] .company-card-metrics span:nth-child(4n + 2),
-[data-theme="liquid"] .decision-chip-row span:nth-child(4n + 2),
-[data-theme="liquid"] .source-breakdown span:nth-child(4n + 2) {
-  border-color: rgb(196 214 244 / 24%);
-  background: rgb(196 214 244 / 9%);
-  color: #dae6f8;
-}
-
-[data-theme="liquid"] .pill:nth-child(4n + 3),
-[data-theme="liquid"] .company-card-metrics span:nth-child(4n + 3),
-[data-theme="liquid"] .decision-chip-row span:nth-child(4n + 3),
-[data-theme="liquid"] .source-breakdown span:nth-child(4n + 3) {
-  border-color: rgb(232 221 255 / 22%);
-  background: rgb(232 221 255 / 8%);
-  color: #e6def7;
-}
-
-[data-theme="liquid"] .pill:nth-child(4n + 4),
-[data-theme="liquid"] .company-card-metrics span:nth-child(4n + 4),
-[data-theme="liquid"] .decision-chip-row span:nth-child(4n + 4),
-[data-theme="liquid"] .source-breakdown span:nth-child(4n + 4) {
-  border-color: rgb(217 232 241 / 22%);
-  background: rgb(217 232 241 / 8%);
-  color: #ddebf4;
-}
-
-[data-theme="liquid"] button.company-card.active {
-  border-color: rgb(255 255 255 / 30%) !important;
-  background:
-    linear-gradient(145deg, rgb(255 255 255 / 17%), rgb(255 255 255 / 7%)),
-    rgb(18 26 38 / 70%) !important;
-}
-
-[data-theme="liquid"] .company-avatar {
-  border-color: rgb(255 255 255 / 20%);
-  background: linear-gradient(150deg, rgb(255 255 255 / 18%), rgb(255 255 255 / 7%));
-  color: #f7faff;
-}
-
-[data-theme="liquid"] .company-card-score {
-  border-color: rgb(255 255 255 / 22%);
-  background: rgb(255 255 255 / 12%);
-  color: #f7faff;
-}
-
-[data-theme="liquid"] .decision-card p,
-[data-theme="liquid"] .detail-header p,
-[data-theme="liquid"] .news-row span,
-[data-theme="liquid"] .panel-head p,
-[data-theme="liquid"] .muted,
-[data-theme="liquid"] .section-subtitle,
-[data-theme="liquid"] .insight-card span,
-[data-theme="liquid"] .insight-card small,
-[data-theme="liquid"] .score-formula span,
-[data-theme="liquid"] .score-line span {
-  color: #aeb9ca;
-}
-
-[data-theme="liquid"] .kpi-item span {
-  color: #aeb9ca;
-}
-
-[data-theme="liquid"] .kpi-item strong,
-[data-theme="liquid"] .news-row strong,
-[data-theme="liquid"] .heading-with-icon,
-[data-theme="liquid"] .data-table td,
-[data-theme="liquid"] .claims-table a {
-  color: #eef4ff;
-}
-
-[data-theme="liquid"] .detail-pane .inline-link,
-[data-theme="liquid"] .detail-pane .linkedin-link,
-[data-theme="liquid"] .detail-pane a,
-[data-theme="liquid"] a {
-  color: #d8e4f8;
-}
-
-[data-theme="liquid"] .company-list::-webkit-scrollbar-thumb {
-  background: rgb(255 255 255 / 24%);
-}
-
-[data-theme="liquid"] .score-bar {
-  background: rgb(255 255 255 / 10%);
-}
-
-[data-theme="liquid"] .score-bar span {
-  background: linear-gradient(90deg, rgb(238 244 255 / 88%), rgb(176 199 235 / 76%));
-}
-
-[data-theme="liquid"] .metric-icon {
-  border-color: rgb(255 255 255 / 18%);
-  background: rgb(255 255 255 / 9%);
-  color: #e5edf8;
-}
-
-[data-theme="liquid"] .status.scraped,
-[data-theme="liquid"] .status.success,
-[data-theme="liquid"] .status.approved,
-[data-theme="liquid"] .status.verified {
-  background: rgb(158 216 184 / 16%);
-  border-color: rgb(180 235 205 / 26%);
-  color: #d9f4e5;
-}
-
-[data-theme="liquid"] .status.failed,
-[data-theme="liquid"] .status.rejected {
-  background: rgb(238 139 164 / 15%);
-  border-color: rgb(255 177 196 / 26%);
-  color: #ffdce6;
-}
-
-[data-theme="liquid"] .status.partial,
-[data-theme="liquid"] .status.running,
-[data-theme="liquid"] .status.pending,
-[data-theme="liquid"] .status.queued,
-[data-theme="liquid"] .status.observed {
-  background: rgb(255 255 255 / 10%);
-  border-color: rgb(255 255 255 / 18%);
-  color: #e4ebf7;
-}
-
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  [data-theme="liquid"] .header,
-  [data-theme="liquid"] .surface,
-  [data-theme="liquid"] .metric-card,
-  [data-theme="liquid"] .connector-card,
-  [data-theme="liquid"] .insight-card,
-  [data-theme="liquid"] .score-formula,
-  [data-theme="liquid"] button.company-card,
-  [data-theme="liquid"] .decision-card,
-  [data-theme="liquid"] .kpi-item,
-  [data-theme="liquid"] .news-row,
-  [data-theme="liquid"] .theme-switcher,
-  [data-theme="liquid"] .tab-bar,
-  [data-theme="liquid"] .icon-button,
-  [data-theme="liquid"] input {
-    background:
-      linear-gradient(150deg, rgb(31 39 52 / 94%), rgb(13 19 29 / 92%)),
-      linear-gradient(120deg, rgb(255 255 255 / 10%), rgb(214 226 246 / 7%)) !important;
-  }
-}
-
+[data-theme="liquid"] .header,
 [data-theme="liquid"] .surface,
-[data-theme="liquid"] .metric-card,
-[data-theme="liquid"] .connector-card,
-[data-theme="liquid"] .insight-card,
-[data-theme="liquid"] .score-formula,
-[data-theme="liquid"] button.company-card,
-[data-theme="liquid"] .decision-card,
-[data-theme="liquid"] .kpi-item,
-[data-theme="liquid"] .news-row {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  background: linear-gradient(180deg, rgb(30 37 49 / 96%), rgb(22 29 40 / 96%)) !important;
-  border-color: #3b4658 !important;
-  box-shadow:
-    0 18px 40px rgb(0 0 0 / 28%),
-    inset 0 1px 0 rgb(255 255 255 / 8%) !important;
-}
-
-[data-theme="liquid"] .surface::before,
-[data-theme="liquid"] .metric-card::before,
-[data-theme="liquid"] .connector-card::before,
-[data-theme="liquid"] .insight-card::before,
-[data-theme="liquid"] .score-formula::before,
-[data-theme="liquid"] button.company-card::before,
-[data-theme="liquid"] .decision-card::before,
-[data-theme="liquid"] .kpi-item::before,
-[data-theme="liquid"] .news-row::before {
-  display: none;
-}
-
-[data-theme="liquid"] .header,
 [data-theme="liquid"] .theme-switcher,
-[data-theme="liquid"] .tab-bar,
-[data-theme="liquid"] .icon-button,
-[data-theme="liquid"] input,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option) {
-  backdrop-filter: blur(28px) saturate(160%);
-  -webkit-backdrop-filter: blur(28px) saturate(160%);
+[data-theme="liquid"] .tab-bar {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 82%), rgb(247 251 255 / 70%)),
+    linear-gradient(125deg, rgb(219 239 255 / 34%), rgb(255 255 255 / 24%), rgb(220 252 245 / 22%)) !important;
+  box-shadow:
+    0 16px 38px rgb(36 62 92 / 14%),
+    inset 0 1px 0 rgb(255 255 255 / 92%),
+    inset 0 -1px 0 rgb(255 255 255 / 42%) !important;
 }
 
 [data-theme="liquid"] .header {
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 18%), rgb(255 255 255 / 8%)),
-    linear-gradient(160deg, rgb(30 37 49 / 82%), rgb(13 18 27 / 78%));
-  border-color: rgb(255 255 255 / 24%);
-}
-
-[data-theme="liquid"] .tab-bar,
-[data-theme="liquid"] .theme-switcher {
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 18%), rgb(255 255 255 / 7%)),
-    rgb(18 24 34 / 66%);
-  border-color: rgb(255 255 255 / 22%);
-}
-
-[data-theme="liquid"] input,
-[data-theme="liquid"] .icon-button,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option) {
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 18%), rgb(255 255 255 / 7%)),
-    rgb(18 24 34 / 70%);
-  border-color: rgb(255 255 255 / 24%);
-  color: #f8fbff;
-}
-
-[data-theme="liquid"] .theme-option,
-[data-theme="liquid"] .tab-bar button {
-  color: #d9e2f0;
-}
-
-[data-theme="liquid"] .theme-option.active,
-[data-theme="liquid"] .tab-bar button.active {
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 26%), rgb(255 255 255 / 12%)),
-    rgb(43 52 66 / 72%);
-  border-color: rgb(255 255 255 / 34%);
-  color: #ffffff;
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 22%),
-    0 10px 24px rgb(0 0 0 / 24%);
-}
-
-[data-theme="liquid"] .hero-kicker {
-  background: rgb(255 255 255 / 12%);
-  border-color: rgb(255 255 255 / 26%);
-  color: #f4f8ff;
-}
-
-[data-theme="liquid"] .connector-card span,
-[data-theme="liquid"] .connector-card small,
-[data-theme="liquid"] .metric-card-head > span:last-child,
-[data-theme="liquid"] .kpi-item span,
-[data-theme="liquid"] .decision-card p,
-[data-theme="liquid"] .panel-head p,
-[data-theme="liquid"] .detail-header p,
-[data-theme="liquid"] .section-subtitle,
-[data-theme="liquid"] .insight-card span,
-[data-theme="liquid"] .insight-card small,
-[data-theme="liquid"] .score-formula span,
-[data-theme="liquid"] .score-line span,
-[data-theme="liquid"] .news-row span,
-[data-theme="liquid"] .muted {
-  color: #c5cedd !important;
-}
-
-[data-theme="liquid"] .connector-card strong,
-[data-theme="liquid"] .metric-grid strong,
-[data-theme="liquid"] .kpi-item strong,
-[data-theme="liquid"] .decision-card h4,
-[data-theme="liquid"] .insight-card strong,
-[data-theme="liquid"] .score-formula strong,
-[data-theme="liquid"] .competitor-cell > strong,
-[data-theme="liquid"] button.company-card strong,
-[data-theme="liquid"] .news-row strong,
-[data-theme="liquid"] .heading-with-icon,
-[data-theme="liquid"] .data-table td,
-[data-theme="liquid"] .claims-table a {
-  color: #f7f9ff !important;
-}
-
-[data-theme="liquid"] .data-table th {
-  background: rgb(39 47 60 / 96%);
-  color: #eef3fb;
-}
-
-[data-theme="liquid"] .data-table td,
-[data-theme="liquid"] .data-table th {
-  border-bottom-color: #3a4454;
-}
-
-[data-theme="liquid"] .data-table tbody tr:hover {
-  background: rgb(255 255 255 / 5%);
-}
-
-[data-theme="liquid"] .pill,
-[data-theme="liquid"] .company-card-metrics span,
-[data-theme="liquid"] .decision-chip-row span,
-[data-theme="liquid"] .source-breakdown span,
-[data-theme="liquid"] .competitor-meta span,
-[data-theme="liquid"] .competitor-meta a,
-[data-theme="liquid"] .driver-stack span {
-  background: rgb(255 255 255 / 8%);
-  border-color: rgb(255 255 255 / 18%);
-  color: #edf3fb;
-}
-
-[data-theme="liquid"] .metric-icon,
-[data-theme="liquid"] .company-avatar,
-[data-theme="liquid"] .company-card-score {
-  background: rgb(255 255 255 / 10%);
-  border-color: rgb(255 255 255 / 20%);
-  color: #f7f9ff;
-}
-
-[data-theme="liquid"] button.company-card.active {
-  background: linear-gradient(180deg, rgb(45 54 70 / 98%), rgb(30 38 52 / 98%)) !important;
-  border-color: #6a7890 !important;
-}
-
-[data-theme="liquid"] .score-bar {
-  background: rgb(255 255 255 / 12%);
-}
-
-[data-theme="liquid"] .score-bar span {
-  background: linear-gradient(90deg, #eef4ff, #b9c9e6);
-}
-
-:root[data-theme="liquid"] body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(700px 180px at 18% 3%, rgb(255 255 255 / 14%), transparent 70%),
-    radial-gradient(560px 220px at 82% 1%, rgb(201 218 249 / 12%), transparent 68%),
-    linear-gradient(112deg, transparent 0 18%, rgb(255 255 255 / 5%) 24%, transparent 34% 100%),
-    linear-gradient(72deg, transparent 0 64%, rgb(255 255 255 / 4%) 72%, transparent 83% 100%);
-  filter: blur(14px);
-  opacity: 0.92;
-  mix-blend-mode: screen;
-}
-
-:root[data-theme="liquid"] body::after {
-  content: "";
-  position: fixed;
-  inset: -12%;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    conic-gradient(from 210deg at 50% 45%, transparent 0 26%, rgb(255 255 255 / 10%) 32%, transparent 39% 100%),
-    radial-gradient(560px 120px at 58% 6%, rgb(255 255 255 / 14%), transparent 72%),
-    linear-gradient(108deg, transparent 0 20%, rgb(214 229 255 / 7%) 31%, transparent 42% 100%);
-  filter: blur(18px);
-  opacity: 0.42;
-  mix-blend-mode: screen;
-  transform: translate3d(0, 0, 0) rotate(-2deg);
-  animation: liquid-caustics 18s ease-in-out infinite alternate;
-}
-
-[data-theme="liquid"] .header,
-[data-theme="liquid"] .theme-switcher,
-[data-theme="liquid"] .tab-bar,
-[data-theme="liquid"] .icon-button,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option) {
-  overflow: hidden;
-  box-shadow:
-    0 18px 46px rgb(0 0 0 / 30%),
-    inset 0 1px 0 rgb(255 255 255 / 32%),
-    inset 0 -1px 0 rgb(255 255 255 / 8%),
-    inset 1px 0 0 rgb(255 255 255 / 10%),
-    inset -1px 0 0 rgb(0 0 0 / 18%);
-}
-
-[data-theme="liquid"] .header::after,
-[data-theme="liquid"] .theme-switcher::after,
-[data-theme="liquid"] .tab-bar::after,
-[data-theme="liquid"] .icon-button::after,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option)::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  background:
-    linear-gradient(116deg, transparent 0 18%, rgb(255 255 255 / 30%) 22%, rgb(255 255 255 / 7%) 29%, transparent 45%),
-    linear-gradient(282deg, transparent 0 56%, rgb(255 255 255 / 10%) 68%, transparent 82%),
-    radial-gradient(180px 60px at 18% 0%, rgb(255 255 255 / 24%), transparent 74%);
-  opacity: 0.34;
-  mix-blend-mode: screen;
-}
-
-[data-theme="liquid"] .header::after {
-  background:
-    linear-gradient(114deg, transparent 0 16%, rgb(255 255 255 / 26%) 22%, rgb(255 255 255 / 7%) 30%, transparent 48%),
-    linear-gradient(276deg, transparent 0 60%, rgb(255 255 255 / 12%) 72%, transparent 86%),
-    radial-gradient(520px 110px at 22% 0%, rgb(255 255 255 / 18%), transparent 74%);
-  opacity: 0.46;
-}
-
-[data-theme="liquid"] .theme-switcher::after,
-[data-theme="liquid"] .tab-bar::after {
-  opacity: 0.42;
-}
-
-[data-theme="liquid"] .icon-button::after,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option)::after {
-  opacity: 0.3;
-}
-
-[data-theme="liquid"] .header > *,
-[data-theme="liquid"] .theme-switcher > *,
-[data-theme="liquid"] .tab-bar > *,
-[data-theme="liquid"] .icon-button > *,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option) > * {
-  position: relative;
-  z-index: 1;
-}
-
-[data-theme="liquid"] input {
-  background:
-    linear-gradient(116deg, transparent 0 18%, rgb(255 255 255 / 13%) 24%, transparent 38%),
-    linear-gradient(180deg, rgb(255 255 255 / 18%), rgb(255 255 255 / 7%)),
-    rgb(18 24 34 / 70%);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 28%),
-    inset 0 -1px 0 rgb(255 255 255 / 7%),
-    0 14px 30px rgb(0 0 0 / 20%);
-}
-
-[data-theme="liquid"] .theme-option.active,
-[data-theme="liquid"] .tab-bar button.active {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 36%),
-    inset 0 -1px 0 rgb(255 255 255 / 10%),
-    0 12px 28px rgb(0 0 0 / 26%);
-}
-
-[data-theme="liquid"] .theme-option:hover,
-[data-theme="liquid"] .tab-bar button:hover,
-[data-theme="liquid"] .icon-button:hover,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option):hover {
-  border-color: rgb(255 255 255 / 34%);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 34%),
-    inset 0 -1px 0 rgb(255 255 255 / 9%),
-    0 16px 34px rgb(0 0 0 / 26%);
-  transform: translateY(-1px);
-}
-
-@keyframes liquid-caustics {
-  from {
-    transform: translate3d(-1.5%, -0.8%, 0) rotate(-2deg) scale(1);
-  }
-
-  to {
-    transform: translate3d(1.5%, 0.9%, 0) rotate(1.5deg) scale(1.03);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  :root[data-theme="liquid"] body::after {
-    animation: none;
-  }
-}
-
-/* Liquid Glass v2: bright refractive material with readable enterprise panels. */
-:root[data-theme="liquid"] body {
-  color: #101827;
-  background:
-    radial-gradient(920px 720px at 7% -12%, rgb(67 144 255 / 42%), transparent 68%),
-    radial-gradient(760px 620px at 95% 4%, rgb(42 221 204 / 28%), transparent 62%),
-    radial-gradient(620px 520px at 52% 118%, rgb(196 128 255 / 22%), transparent 64%),
-    conic-gradient(from 205deg at 50% 28%, rgb(255 255 255 / 36%), rgb(212 236 255 / 42%), rgb(246 224 255 / 28%), rgb(255 255 255 / 38%)),
-    linear-gradient(180deg, #f8fbff 0%, #edf6ff 48%, #eaf7f5 100%);
-  background-attachment: fixed;
-}
-
-:root[data-theme="liquid"] body::before {
-  background:
-    linear-gradient(112deg, transparent 0 17%, rgb(255 255 255 / 42%) 22%, transparent 31% 100%),
-    linear-gradient(66deg, transparent 0 58%, rgb(255 255 255 / 28%) 68%, transparent 80% 100%),
-    radial-gradient(860px 190px at 21% 2%, rgb(255 255 255 / 56%), transparent 74%),
-    radial-gradient(740px 260px at 82% 8%, rgb(183 216 255 / 28%), transparent 70%);
-  filter: blur(18px);
-  opacity: 0.74;
-  mix-blend-mode: screen;
-}
-
-:root[data-theme="liquid"] body::after {
-  background:
-    conic-gradient(from 216deg at 49% 35%, transparent 0 24%, rgb(255 255 255 / 24%) 31%, transparent 40% 100%),
-    radial-gradient(520px 160px at 59% 7%, rgb(255 255 255 / 40%), transparent 72%),
-    linear-gradient(104deg, transparent 0 18%, rgb(159 209 255 / 17%) 31%, transparent 43% 100%);
-  filter: blur(24px);
-  opacity: 0.6;
-  mix-blend-mode: screen;
-  animation: liquid-caustics 16s ease-in-out infinite alternate;
-}
-
-[data-theme="liquid"] .app-shell::before {
-  background:
-    linear-gradient(rgb(255 255 255 / 22%) 1px, transparent 1px) 0 0 / 100% 34px,
-    linear-gradient(90deg, rgb(255 255 255 / 18%) 1px, transparent 1px) 0 0 / 34px 100%,
-    radial-gradient(900px 520px at 12% 0%, rgb(255 255 255 / 38%), transparent 65%),
-    radial-gradient(720px 440px at 91% 10%, rgb(125 211 252 / 20%), transparent 62%);
-  mask-image: linear-gradient(180deg, rgb(0 0 0 / 50%), transparent 86%);
-}
-
-[data-theme="liquid"] .header,
-[data-theme="liquid"] .theme-switcher,
-[data-theme="liquid"] .tab-bar,
-[data-theme="liquid"] .icon-button,
-[data-theme="liquid"] input,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option) {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  color: #111827;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 74%), rgb(255 255 255 / 43%)),
-    linear-gradient(126deg, rgb(255 255 255 / 52%), rgb(219 239 255 / 24%), rgb(255 255 255 / 38%)) !important;
-  border-color: rgb(255 255 255 / 84%) !important;
-  box-shadow:
-    0 24px 70px rgb(30 41 59 / 17%),
-    0 2px 8px rgb(15 23 42 / 7%),
-    inset 0 1px 0 rgb(255 255 255 / 96%),
-    inset 0 -1px 0 rgb(255 255 255 / 44%),
-    inset 1px 0 0 rgb(255 255 255 / 42%) !important;
-  -webkit-backdrop-filter: blur(36px) saturate(190%) contrast(1.04);
-  backdrop-filter: blur(36px) saturate(190%) contrast(1.04);
+  align-items: center;
+  border-radius: var(--liquid-radius-shell) !important;
+  padding: 18px 20px !important;
 }
 
 [data-theme="liquid"] .header::before,
-[data-theme="liquid"] .theme-switcher::before,
-[data-theme="liquid"] .tab-bar::before,
-[data-theme="liquid"] .icon-button::before,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option)::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  display: block;
-  pointer-events: none;
-  border-radius: inherit;
-  background:
-    radial-gradient(140% 100% at 18% 0%, rgb(255 255 255 / 72%), transparent 46%),
-    linear-gradient(118deg, transparent 0 18%, rgb(255 255 255 / 72%) 22%, rgb(255 255 255 / 16%) 31%, transparent 48%),
-    linear-gradient(290deg, transparent 0 58%, rgb(255 255 255 / 36%) 68%, transparent 84%);
-  opacity: 0.58;
-  mix-blend-mode: screen;
-}
-
 [data-theme="liquid"] .header::after,
+[data-theme="liquid"] .theme-switcher::before,
 [data-theme="liquid"] .theme-switcher::after,
+[data-theme="liquid"] .tab-bar::before,
 [data-theme="liquid"] .tab-bar::after,
+[data-theme="liquid"] .icon-button::before,
 [data-theme="liquid"] .icon-button::after,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option)::after {
-  content: "";
-  position: absolute;
-  inset: 1px;
-  z-index: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 64%), transparent 23%),
-    radial-gradient(240px 92px at 14% 0%, rgb(255 255 255 / 62%), transparent 72%),
-    radial-gradient(260px 110px at 90% 100%, rgb(119 194 255 / 16%), transparent 76%);
-  opacity: 0.72;
-  mix-blend-mode: screen;
-}
-
-[data-theme="liquid"] .header > *,
-[data-theme="liquid"] .theme-switcher > *,
-[data-theme="liquid"] .tab-bar > *,
-[data-theme="liquid"] .icon-button > *,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option) > * {
-  position: relative;
-  z-index: 1;
-}
-
-[data-theme="liquid"] .header {
-  border-radius: 30px;
-  padding: 22px 24px;
+[data-theme="liquid"] button:not(.company-card)::before,
+[data-theme="liquid"] button:not(.company-card)::after {
+  display: none !important;
 }
 
 [data-theme="liquid"] .header h1,
-[data-theme="liquid"] .header p {
-  color: #0f172a !important;
+[data-theme="liquid"] .header p,
+[data-theme="liquid"] h2,
+[data-theme="liquid"] h3,
+[data-theme="liquid"] .heading-with-icon,
+[data-theme="liquid"] .detail-header h2 {
+  color: var(--ink-900) !important;
 }
 
-[data-theme="liquid"] .header p {
-  color: #334155 !important;
+[data-theme="liquid"] .header p,
+[data-theme="liquid"] .panel-head p,
+[data-theme="liquid"] .detail-header p,
+[data-theme="liquid"] .section-subtitle,
+[data-theme="liquid"] .muted {
+  color: var(--ink-700) !important;
 }
 
-[data-theme="liquid"] .theme-switcher,
-[data-theme="liquid"] .tab-bar {
-  border-radius: 22px;
-  padding: 7px;
+[data-theme="liquid"] .header-actions {
+  align-items: center;
+  gap: 8px;
 }
 
-[data-theme="liquid"] .theme-option,
-[data-theme="liquid"] .tab-bar button {
-  color: #334155 !important;
-  border-radius: 16px;
+[data-theme="liquid"] .hero-kicker {
+  border-color: rgb(14 116 144 / 20%) !important;
+  background: rgb(240 249 255 / 78%) !important;
+  color: #075985 !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%);
 }
 
-[data-theme="liquid"] .theme-option.active,
-[data-theme="liquid"] .tab-bar button.active {
-  color: #0f172a !important;
+[data-theme="liquid"] .theme-switcher {
+  min-height: 40px;
+  min-width: 184px;
+  border-radius: var(--liquid-radius-control) !important;
+  padding: 0 10px !important;
+  box-shadow: var(--theme-glow) !important;
+}
+
+[data-theme="liquid"] .theme-select {
+  color: var(--ink-900) !important;
+}
+
+[data-theme="liquid"] .theme-select-icon,
+[data-theme="liquid"] .theme-select-chevron {
+  color: #087ea4;
+}
+
+[data-theme="liquid"] .surface {
+  border-radius: var(--liquid-radius-panel) !important;
+  padding: 14px !important;
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 86%), rgb(255 255 255 / 48%)),
-    linear-gradient(105deg, rgb(186 230 253 / 42%), rgb(221 214 254 / 32%)) !important;
-  border-color: rgb(255 255 255 / 96%) !important;
+    linear-gradient(180deg, rgb(255 255 255 / 78%), rgb(247 251 255 / 68%)),
+    linear-gradient(125deg, rgb(219 239 255 / 26%), rgb(220 252 245 / 18%)) !important;
   box-shadow:
-    0 14px 32px rgb(37 99 235 / 14%),
-    inset 0 1px 0 rgb(255 255 255 / 96%),
-    inset 0 -1px 0 rgb(255 255 255 / 48%) !important;
+    0 12px 32px rgb(36 62 92 / 11%),
+    inset 0 1px 0 rgb(255 255 255 / 88%) !important;
+  contain: paint;
 }
 
-[data-theme="liquid"] .icon-button,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option) {
-  border-radius: 16px;
+[data-theme="liquid"] .surface::before {
+  display: block !important;
+  height: 2px;
+  background: linear-gradient(90deg, #0ea5e9, #14b8a6, #8b5cf6);
+  opacity: 0.52;
 }
 
-[data-theme="liquid"] .icon-button svg,
-[data-theme="liquid"] .theme-option svg,
-[data-theme="liquid"] .tab-bar button svg,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option) svg {
-  color: currentColor;
+[data-theme="liquid"] .metric-grid,
+[data-theme="liquid"] .connector-strip,
+[data-theme="liquid"] .company-kpi-grid,
+[data-theme="liquid"] .decision-grid {
+  gap: 10px;
 }
 
-[data-theme="liquid"] .surface,
 [data-theme="liquid"] .metric-card,
 [data-theme="liquid"] .connector-card,
 [data-theme="liquid"] .insight-card,
@@ -2686,35 +2242,52 @@ button.company-card.active {
 [data-theme="liquid"] .decision-card,
 [data-theme="liquid"] .kpi-item,
 [data-theme="liquid"] .news-row {
-  color: #111827 !important;
+  border-radius: var(--liquid-radius-card) !important;
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 78%), rgb(255 255 255 / 64%)),
-    linear-gradient(125deg, rgb(255 255 255 / 52%), rgb(221 239 255 / 22%), rgb(255 255 255 / 34%)) !important;
-  border-color: rgb(255 255 255 / 78%) !important;
+    linear-gradient(180deg, rgb(255 255 255 / 86%), rgb(249 252 255 / 78%)),
+    linear-gradient(125deg, rgb(219 239 255 / 20%), rgb(255 255 255 / 10%)) !important;
+  border-color: rgb(193 211 226 / 72%) !important;
   box-shadow:
-    0 18px 46px rgb(30 41 59 / 12%),
-    0 1px 0 rgb(255 255 255 / 80%) inset,
-    0 -1px 0 rgb(255 255 255 / 26%) inset !important;
-  -webkit-backdrop-filter: blur(18px) saturate(160%);
-  backdrop-filter: blur(18px) saturate(160%);
+    0 8px 22px rgb(36 62 92 / 9%),
+    inset 0 1px 0 rgb(255 255 255 / 82%) !important;
+  color: var(--ink-900) !important;
+  contain: paint;
 }
 
-[data-theme="liquid"] .surface {
-  border-radius: 26px;
+[data-theme="liquid"] .metric-card:hover,
+[data-theme="liquid"] .connector-card:hover,
+[data-theme="liquid"] button.company-card:hover,
+[data-theme="liquid"] .news-row:hover {
+  border-color: rgb(111 171 211 / 74%) !important;
+  box-shadow:
+    0 10px 24px rgb(36 62 92 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 86%) !important;
+  transform: translateY(-1px);
 }
 
-[data-theme="liquid"] .metric-card,
-[data-theme="liquid"] .connector-card,
-[data-theme="liquid"] .insight-card,
-[data-theme="liquid"] .decision-card,
-[data-theme="liquid"] .kpi-item,
-[data-theme="liquid"] .news-row,
-[data-theme="liquid"] button.company-card {
-  border-radius: 18px;
+[data-theme="liquid"] button.company-card.active {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 92%), rgb(239 249 255 / 84%)),
+    linear-gradient(125deg, rgb(186 230 253 / 34%), rgb(221 214 254 / 22%)) !important;
+  border-color: rgb(14 165 233 / 48%) !important;
+  box-shadow:
+    0 10px 26px rgb(14 116 144 / 13%),
+    inset 0 1px 0 rgb(255 255 255 / 92%) !important;
 }
 
-[data-theme="liquid"] .surface::before,
 [data-theme="liquid"] .metric-card::before,
+[data-theme="liquid"] .metric-card:nth-child(2)::before,
+[data-theme="liquid"] .metric-card:nth-child(3)::before,
+[data-theme="liquid"] .metric-card:nth-child(4)::before,
+[data-theme="liquid"] .metric-card:nth-child(5)::before,
+[data-theme="liquid"] .metric-card:nth-child(6)::before,
+[data-theme="liquid"] .metric-card:nth-child(7)::before {
+  display: block !important;
+  height: 2px;
+  background: linear-gradient(90deg, #0ea5e9, #14b8a6);
+  opacity: 0.72;
+}
+
 [data-theme="liquid"] .connector-card::before,
 [data-theme="liquid"] .insight-card::before,
 [data-theme="liquid"] .score-formula::before,
@@ -2725,22 +2298,67 @@ button.company-card.active {
   display: none !important;
 }
 
-[data-theme="liquid"] .hero-kicker {
+[data-theme="liquid"] .metric-icon,
+[data-theme="liquid"] .company-avatar,
+[data-theme="liquid"] .company-card-score {
+  border-radius: 8px !important;
   color: #075985 !important;
-  background: rgb(255 255 255 / 56%) !important;
-  border-color: rgb(255 255 255 / 84%) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%);
+  background: rgb(240 249 255 / 82%) !important;
+  border-color: rgb(125 211 252 / 46%) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%) !important;
 }
 
-[data-theme="liquid"] input {
-  color: #0f172a !important;
+[data-theme="liquid"] .company-card-score {
+  border-radius: 999px !important;
+}
+
+[data-theme="liquid"] .tab-bar {
+  border-radius: var(--liquid-radius-panel) !important;
+  padding: 5px !important;
+  gap: 6px;
+}
+
+[data-theme="liquid"] .tab-bar button {
+  min-height: 34px;
+  border-radius: var(--liquid-radius-control) !important;
+  color: var(--ink-700) !important;
+}
+
+[data-theme="liquid"] .tab-bar button:hover {
+  background: rgb(255 255 255 / 64%) !important;
+  border-color: rgb(148 194 224 / 66%) !important;
+}
+
+[data-theme="liquid"] .tab-bar button.active {
+  color: var(--ink-900) !important;
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 80%), rgb(255 255 255 / 52%)),
-    rgb(255 255 255 / 48%) !important;
+    linear-gradient(180deg, rgb(255 255 255 / 88%), rgb(238 248 255 / 78%)),
+    linear-gradient(95deg, rgb(14 165 233 / 18%), rgb(20 184 166 / 15%), rgb(139 92 246 / 12%)) !important;
+  border-color: rgb(125 177 211 / 78%) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 92%) !important;
+}
+
+[data-theme="liquid"] input,
+[data-theme="liquid"] .icon-button,
+[data-theme="liquid"] .url-form button {
+  border-radius: var(--liquid-radius-control) !important;
+  background: linear-gradient(180deg, rgb(255 255 255 / 86%), rgb(243 249 255 / 76%)) !important;
+  border-color: rgb(193 211 226 / 78%) !important;
+  color: var(--ink-900) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 88%) !important;
 }
 
 [data-theme="liquid"] input::placeholder {
-  color: #64748b !important;
+  color: var(--ink-500) !important;
+}
+
+[data-theme="liquid"] .icon-button:hover,
+[data-theme="liquid"] .url-form button:hover {
+  border-color: rgb(111 171 211 / 76%) !important;
+  box-shadow:
+    0 8px 20px rgb(36 62 92 / 10%),
+    inset 0 1px 0 rgb(255 255 255 / 90%) !important;
+  transform: translateY(-1px);
 }
 
 [data-theme="liquid"] .connector-card span,
@@ -2748,18 +2366,14 @@ button.company-card.active {
 [data-theme="liquid"] .metric-card-head > span:last-child,
 [data-theme="liquid"] .kpi-item span,
 [data-theme="liquid"] .decision-card p,
-[data-theme="liquid"] .panel-head p,
-[data-theme="liquid"] .detail-header p,
-[data-theme="liquid"] .section-subtitle,
+[data-theme="liquid"] .news-row span,
 [data-theme="liquid"] .insight-card span,
 [data-theme="liquid"] .insight-card small,
 [data-theme="liquid"] .score-formula span,
 [data-theme="liquid"] .score-line span,
-[data-theme="liquid"] .news-row span,
-[data-theme="liquid"] .muted,
 [data-theme="liquid"] .company-card-title span,
 [data-theme="liquid"] .company-card-title span svg {
-  color: #475569 !important;
+  color: var(--ink-500) !important;
 }
 
 [data-theme="liquid"] .connector-card strong,
@@ -2771,66 +2385,38 @@ button.company-card.active {
 [data-theme="liquid"] .competitor-cell > strong,
 [data-theme="liquid"] button.company-card strong,
 [data-theme="liquid"] .news-row strong,
-[data-theme="liquid"] .heading-with-icon,
 [data-theme="liquid"] .data-table td,
-[data-theme="liquid"] .claims-table a,
-[data-theme="liquid"] .detail-header h2,
-[data-theme="liquid"] h2,
-[data-theme="liquid"] h3 {
-  color: #0f172a !important;
+[data-theme="liquid"] .claims-table a {
+  color: var(--ink-900) !important;
 }
 
-[data-theme="liquid"] .detail-pane .inline-link,
-[data-theme="liquid"] .detail-pane .linkedin-link,
-[data-theme="liquid"] .detail-pane a,
-[data-theme="liquid"] a {
-  color: #075da8 !important;
+[data-theme="liquid"] .data-table th {
+  color: var(--ink-700) !important;
+  background: rgb(247 251 255 / 82%) !important;
 }
 
-[data-theme="liquid"] .metric-icon,
-[data-theme="liquid"] .company-avatar,
-[data-theme="liquid"] .company-card-score {
-  color: #075985 !important;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 78%), rgb(255 255 255 / 46%)),
-    rgb(186 230 253 / 30%) !important;
-  border-color: rgb(255 255 255 / 92%) !important;
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 90%),
-    0 8px 18px rgb(14 116 144 / 10%);
+[data-theme="liquid"] .data-table td,
+[data-theme="liquid"] .data-table th {
+  border-bottom-color: rgb(193 211 226 / 52%) !important;
 }
 
-[data-theme="liquid"] .metric-card::after {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 3px;
-  background:
-    linear-gradient(90deg, rgb(14 165 233 / 85%), rgb(34 211 238 / 72%), rgb(168 85 247 / 68%));
-}
-
-[data-theme="liquid"] button.company-card.active {
-  color: #0f172a !important;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 90%), rgb(255 255 255 / 70%)),
-    linear-gradient(125deg, rgb(186 230 253 / 44%), rgb(221 214 254 / 28%)) !important;
-  border-color: rgb(56 189 248 / 60%) !important;
-  box-shadow:
-    0 18px 44px rgb(14 116 144 / 16%),
-    inset 0 1px 0 rgb(255 255 255 / 96%) !important;
+[data-theme="liquid"] .data-table tbody tr:hover {
+  background: rgb(240 249 255 / 66%) !important;
 }
 
 [data-theme="liquid"] .pill,
 [data-theme="liquid"] .company-card-metrics span,
 [data-theme="liquid"] .decision-chip-row span,
 [data-theme="liquid"] .source-breakdown span,
+[data-theme="liquid"] .job-result-metrics span,
+[data-theme="liquid"] .job-result-pill,
 [data-theme="liquid"] .competitor-meta span,
 [data-theme="liquid"] .competitor-meta a,
 [data-theme="liquid"] .driver-stack span {
-  color: #164e63 !important;
-  background: rgb(255 255 255 / 58%) !important;
-  border-color: rgb(125 211 252 / 46%) !important;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 86%);
+  color: #155e75 !important;
+  background: rgb(240 249 255 / 78%) !important;
+  border-color: rgb(125 211 252 / 38%) !important;
+  box-shadow: none !important;
 }
 
 [data-theme="liquid"] .pill:nth-child(4n + 2),
@@ -2838,17 +2424,17 @@ button.company-card.active {
 [data-theme="liquid"] .decision-chip-row span:nth-child(4n + 2),
 [data-theme="liquid"] .source-breakdown span:nth-child(4n + 2) {
   color: #3730a3 !important;
-  border-color: rgb(165 180 252 / 54%) !important;
-  background: rgb(238 242 255 / 70%) !important;
+  background: rgb(238 242 255 / 76%) !important;
+  border-color: rgb(165 180 252 / 42%) !important;
 }
 
 [data-theme="liquid"] .pill:nth-child(4n + 3),
 [data-theme="liquid"] .company-card-metrics span:nth-child(4n + 3),
 [data-theme="liquid"] .decision-chip-row span:nth-child(4n + 3),
 [data-theme="liquid"] .source-breakdown span:nth-child(4n + 3) {
-  color: #86198f !important;
-  border-color: rgb(240 171 252 / 50%) !important;
-  background: rgb(253 244 255 / 70%) !important;
+  color: #7e22ce !important;
+  background: rgb(250 245 255 / 76%) !important;
+  border-color: rgb(216 180 254 / 42%) !important;
 }
 
 [data-theme="liquid"] .pill:nth-child(4n + 4),
@@ -2856,34 +2442,23 @@ button.company-card.active {
 [data-theme="liquid"] .decision-chip-row span:nth-child(4n + 4),
 [data-theme="liquid"] .source-breakdown span:nth-child(4n + 4) {
   color: #0f766e !important;
-  border-color: rgb(94 234 212 / 46%) !important;
-  background: rgb(240 253 250 / 70%) !important;
-}
-
-[data-theme="liquid"] .data-table {
-  color: #0f172a !important;
-}
-
-[data-theme="liquid"] .data-table th {
-  color: #475569 !important;
-  background: rgb(241 245 249 / 74%) !important;
-}
-
-[data-theme="liquid"] .data-table td,
-[data-theme="liquid"] .data-table th {
-  border-bottom-color: rgb(148 163 184 / 24%) !important;
-}
-
-[data-theme="liquid"] .data-table tbody tr:hover {
-  background: rgb(255 255 255 / 46%) !important;
+  background: rgb(240 253 250 / 76%) !important;
+  border-color: rgb(94 234 212 / 38%) !important;
 }
 
 [data-theme="liquid"] .score-bar {
-  background: rgb(15 23 42 / 9%) !important;
+  background: rgb(15 23 42 / 8%) !important;
 }
 
 [data-theme="liquid"] .score-bar span {
-  background: linear-gradient(90deg, #0ea5e9, #22d3ee, #a855f7) !important;
+  background: linear-gradient(90deg, #0ea5e9, #14b8a6, #8b5cf6) !important;
+}
+
+[data-theme="liquid"] .detail-pane .inline-link,
+[data-theme="liquid"] .detail-pane .linkedin-link,
+[data-theme="liquid"] .detail-pane a,
+[data-theme="liquid"] a {
+  color: #075985 !important;
 }
 
 [data-theme="liquid"] .status.scraped,
@@ -2891,15 +2466,15 @@ button.company-card.active {
 [data-theme="liquid"] .status.approved,
 [data-theme="liquid"] .status.verified {
   color: #166534 !important;
-  background: rgb(220 252 231 / 80%) !important;
-  border-color: rgb(74 222 128 / 42%) !important;
+  background: rgb(220 252 231 / 82%) !important;
+  border-color: rgb(74 222 128 / 36%) !important;
 }
 
 [data-theme="liquid"] .status.failed,
 [data-theme="liquid"] .status.rejected {
   color: #9f1239 !important;
   background: rgb(255 228 230 / 84%) !important;
-  border-color: rgb(251 113 133 / 42%) !important;
+  border-color: rgb(251 113 133 / 36%) !important;
 }
 
 [data-theme="liquid"] .status.partial,
@@ -2909,83 +2484,27 @@ button.company-card.active {
 [data-theme="liquid"] .status.observed {
   color: #075985 !important;
   background: rgb(224 242 254 / 82%) !important;
-  border-color: rgb(56 189 248 / 42%) !important;
-}
-
-[data-theme="liquid"] .theme-option:hover,
-[data-theme="liquid"] .tab-bar button:hover,
-[data-theme="liquid"] .icon-button:hover,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option):hover {
-  border-color: rgb(255 255 255 / 100%) !important;
-  transform: translateY(-1px) scale(1.01);
-  box-shadow:
-    0 22px 48px rgb(37 99 235 / 16%),
-    inset 0 1px 0 rgb(255 255 255 / 98%),
-    inset 0 -1px 0 rgb(255 255 255 / 44%) !important;
+  border-color: rgb(56 189 248 / 36%) !important;
 }
 
 [data-theme="liquid"] .company-list::-webkit-scrollbar-thumb {
-  background: rgb(14 165 233 / 38%) !important;
+  background: rgb(14 165 233 / 32%) !important;
 }
 
-/* Performance guard: keep the liquid look without compositor-heavy live SVG filters. */
-:root[data-theme="liquid"] body {
-  background-attachment: scroll;
+[data-theme="liquid"] .job-result-metrics strong,
+[data-theme="liquid"] .job-result-pill strong {
+  color: var(--ink-900) !important;
 }
 
-:root[data-theme="liquid"] body::before {
-  filter: blur(8px);
-  opacity: 0.52;
-}
+@media (max-width: 760px) {
+  [data-theme="liquid"] .header {
+    align-items: stretch;
+    border-radius: 12px !important;
+  }
 
-:root[data-theme="liquid"] body::after {
-  animation: none !important;
-  filter: blur(10px);
-  opacity: 0.32;
-  transform: none;
-}
-
-[data-theme="liquid"] .header,
-[data-theme="liquid"] .theme-switcher,
-[data-theme="liquid"] .tab-bar {
-  -webkit-backdrop-filter: blur(20px) saturate(150%) !important;
-  backdrop-filter: blur(20px) saturate(150%) !important;
-}
-
-[data-theme="liquid"] .icon-button,
-[data-theme="liquid"] input,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option) {
-  -webkit-backdrop-filter: blur(12px) saturate(140%) !important;
-  backdrop-filter: blur(12px) saturate(140%) !important;
-}
-
-[data-theme="liquid"] .surface,
-[data-theme="liquid"] .metric-card,
-[data-theme="liquid"] .connector-card,
-[data-theme="liquid"] .insight-card,
-[data-theme="liquid"] .score-formula,
-[data-theme="liquid"] button.company-card,
-[data-theme="liquid"] .decision-card,
-[data-theme="liquid"] .kpi-item,
-[data-theme="liquid"] .news-row {
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  contain: paint;
-}
-
-[data-theme="liquid"] .header::before,
-[data-theme="liquid"] .theme-switcher::before,
-[data-theme="liquid"] .tab-bar::before,
-[data-theme="liquid"] .icon-button::before,
-[data-theme="liquid"] button:not(.company-card):not(.theme-option)::before {
-  filter: none !important;
-}
-
-[data-theme="liquid"] button.company-card,
-[data-theme="liquid"] .news-row,
-[data-theme="liquid"] .connector-card {
-  content-visibility: auto;
-  contain-intrinsic-size: 96px;
+  [data-theme="liquid"] .theme-switcher {
+    width: 100%;
+  }
 }
 
 [data-theme="frosted"] .app-shell::before {
@@ -3123,234 +2642,496 @@ button.company-card.active {
   background: #9bc0d6;
 }
 
+[data-theme="warm-frosted"] .app-shell::before {
+  background:
+    linear-gradient(rgb(244 114 88 / 10%) 1px, transparent 1px) 0 0 / 100% 34px,
+    linear-gradient(90deg, rgb(15 118 110 / 7%) 1px, transparent 1px) 0 0 / 34px 100%,
+    radial-gradient(900px 420px at 12% 0%, rgb(244 114 88 / 9%), transparent 68%),
+    radial-gradient(760px 380px at 90% 4%, rgb(20 184 166 / 8%), transparent 66%);
+}
+
+[data-theme="warm-frosted"] .header,
+[data-theme="warm-frosted"] .surface,
+[data-theme="warm-frosted"] .metric-card,
+[data-theme="warm-frosted"] .connector-card,
+[data-theme="warm-frosted"] button.company-card,
+[data-theme="warm-frosted"] .decision-card,
+[data-theme="warm-frosted"] .kpi-item,
+[data-theme="warm-frosted"] .news-row,
+[data-theme="warm-frosted"] .theme-switcher,
+[data-theme="warm-frosted"] .tab-bar,
+[data-theme="warm-frosted"] .icon-button {
+  -webkit-backdrop-filter: blur(16px) saturate(138%);
+  backdrop-filter: blur(16px) saturate(138%);
+}
+
+[data-theme="warm-frosted"] .header {
+  background:
+    linear-gradient(122deg, rgb(255 255 255 / 78%), rgb(255 246 239 / 70%)),
+    linear-gradient(135deg, rgb(244 114 88 / 14%), rgb(245 158 11 / 10%), rgb(20 184 166 / 9%));
+  border-color: #e3c5b7;
+}
+
+[data-theme="warm-frosted"] .header::after {
+  background: radial-gradient(circle at 40% 40%, rgb(244 114 88 / 22%), transparent 68%);
+}
+
+[data-theme="warm-frosted"] .hero-kicker {
+  border-color: rgb(199 107 38 / 32%);
+  background: rgb(199 107 38 / 11%);
+  color: #9a4f1b;
+}
+
+[data-theme="warm-frosted"] .theme-switcher {
+  border-color: #dec2b5;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 82%), rgb(255 246 239 / 72%)),
+    linear-gradient(120deg, rgb(244 114 88 / 8%), rgb(20 184 166 / 7%));
+}
+
+[data-theme="warm-frosted"] .theme-select-icon,
+[data-theme="warm-frosted"] .theme-select-chevron {
+  color: #b75e24;
+}
+
+[data-theme="warm-frosted"] .tab-bar button.active {
+  border-color: #d99d83;
+  background: linear-gradient(95deg, rgb(244 114 88 / 17%), rgb(245 158 11 / 13%), rgb(20 184 166 / 13%));
+  color: #5b3529;
+}
+
+[data-theme="warm-frosted"] .metric-card {
+  background:
+    linear-gradient(160deg, rgb(255 255 255 / 80%), rgb(255 246 239 / 72%)),
+    linear-gradient(120deg, rgb(244 114 88 / 10%), rgb(245 158 11 / 8%), rgb(20 184 166 / 8%));
+}
+
+[data-theme="warm-frosted"] .icon-button {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 84%), rgb(255 245 238 / 74%)),
+    linear-gradient(120deg, rgb(244 114 88 / 8%), rgb(20 184 166 / 7%));
+}
+
+[data-theme="warm-frosted"] .data-table th {
+  color: #68473a;
+  background: rgb(255 248 244 / 88%);
+}
+
+[data-theme="warm-frosted"] .data-table tbody tr:hover {
+  background: rgb(244 114 88 / 7%);
+}
+
+[data-theme="warm-frosted"] button.company-card.active {
+  border-color: #d99d83;
+  background:
+    linear-gradient(130deg, rgb(255 253 250 / 88%), rgb(255 242 235 / 78%)),
+    linear-gradient(120deg, rgb(244 114 88 / 13%), rgb(245 158 11 / 9%), rgb(20 184 166 / 10%));
+}
+
+[data-theme="warm-frosted"] .company-avatar {
+  border-color: #d6a58e;
+  background: linear-gradient(150deg, rgb(244 114 88 / 18%), rgb(245 158 11 / 12%), rgb(20 184 166 / 14%));
+  color: #7a3f23;
+}
+
+[data-theme="warm-frosted"] .pill:nth-child(4n + 1),
+[data-theme="warm-frosted"] .company-card-metrics span:nth-child(4n + 1),
+[data-theme="warm-frosted"] .decision-chip-row span:nth-child(4n + 1),
+[data-theme="warm-frosted"] .source-breakdown span:nth-child(4n + 1) {
+  border-color: rgb(199 107 38 / 34%);
+  background: rgb(199 107 38 / 10%);
+  color: #8b4b20;
+}
+
+[data-theme="warm-frosted"] .pill:nth-child(4n + 2),
+[data-theme="warm-frosted"] .company-card-metrics span:nth-child(4n + 2),
+[data-theme="warm-frosted"] .decision-chip-row span:nth-child(4n + 2),
+[data-theme="warm-frosted"] .source-breakdown span:nth-child(4n + 2) {
+  border-color: rgb(15 118 110 / 32%);
+  background: rgb(15 118 110 / 9%);
+  color: #0f665f;
+}
+
+[data-theme="warm-frosted"] .pill:nth-child(4n + 3),
+[data-theme="warm-frosted"] .company-card-metrics span:nth-child(4n + 3),
+[data-theme="warm-frosted"] .decision-chip-row span:nth-child(4n + 3),
+[data-theme="warm-frosted"] .source-breakdown span:nth-child(4n + 3) {
+  border-color: rgb(104 96 183 / 30%);
+  background: rgb(104 96 183 / 9%);
+  color: #5148a0;
+}
+
+[data-theme="warm-frosted"] .pill:nth-child(4n + 4),
+[data-theme="warm-frosted"] .company-card-metrics span:nth-child(4n + 4),
+[data-theme="warm-frosted"] .decision-chip-row span:nth-child(4n + 4),
+[data-theme="warm-frosted"] .source-breakdown span:nth-child(4n + 4) {
+  border-color: rgb(194 65 91 / 30%);
+  background: rgb(194 65 91 / 9%);
+  color: #9d3349;
+}
+
+[data-theme="warm-frosted"] .detail-pane .inline-link,
+[data-theme="warm-frosted"] .detail-pane .linkedin-link,
+[data-theme="warm-frosted"] .detail-pane a,
+[data-theme="warm-frosted"] a {
+  color: #0b7184;
+}
+
+[data-theme="warm-frosted"] .company-list::-webkit-scrollbar-thumb {
+  background: #d9ab96;
+}
+
 [data-theme="heritage"] .app-shell::before {
   background:
-    linear-gradient(rgb(200 165 112 / 8%) 1px, transparent 1px) 0 0 / 100% 34px,
-    linear-gradient(90deg, rgb(200 165 112 / 6%) 1px, transparent 1px) 0 0 / 34px 100%;
+    linear-gradient(rgb(138 184 168 / 7%) 1px, transparent 1px) 0 0 / 100% 34px,
+    linear-gradient(90deg, rgb(214 164 95 / 6%) 1px, transparent 1px) 0 0 / 34px 100%,
+    radial-gradient(900px 420px at 10% 0%, rgb(45 212 191 / 7%), transparent 68%),
+    radial-gradient(720px 360px at 88% 5%, rgb(214 164 95 / 8%), transparent 68%);
 }
 
 [data-theme="heritage"] .header {
   background:
-    linear-gradient(120deg, var(--surface-2), var(--surface-1)),
-    linear-gradient(135deg, rgb(196 161 110 / 16%), rgb(121 93 57 / 12%));
+    linear-gradient(135deg, rgb(31 43 41 / 96%), rgb(18 28 31 / 94%)),
+    linear-gradient(115deg, rgb(45 212 191 / 10%), rgb(214 164 95 / 11%), rgb(154 167 217 / 7%));
+  border-color: #586b60;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 [data-theme="heritage"] .header::after {
-  background: radial-gradient(circle at 40% 40%, rgb(201 169 119 / 20%), transparent 68%);
+  background: radial-gradient(circle at 40% 40%, rgb(45 212 191 / 14%), transparent 66%);
 }
 
 [data-theme="heritage"] .hero-kicker {
-  border-color: rgb(216 188 145 / 42%);
-  background: rgb(216 188 145 / 12%);
-  color: #f0d7ae;
+  border-color: rgb(214 164 95 / 40%);
+  background: rgb(214 164 95 / 12%);
+  color: #f6d9a7;
 }
 
 [data-theme="heritage"] .theme-switcher {
-  border-color: #6f5d46;
-  background: linear-gradient(180deg, rgb(44 35 25 / 94%), rgb(32 25 18 / 94%));
+  border-color: #596a61;
+  background: linear-gradient(180deg, rgb(32 42 40 / 96%), rgb(20 30 31 / 96%));
 }
 
 [data-theme="heritage"] .theme-option {
-  color: #dbc8a7;
+  color: #d8cfbd;
 }
 
 [data-theme="heritage"] .theme-option.active {
-  background: linear-gradient(95deg, rgb(193 159 108 / 30%), rgb(184 139 96 / 28%), rgb(139 112 73 / 28%));
-  border-color: #9f865f;
-  color: #f6e8ce;
+  background: linear-gradient(95deg, rgb(45 212 191 / 18%), rgb(214 164 95 / 18%), rgb(154 167 217 / 14%));
+  border-color: #9fbd85;
+  color: #fff1d7;
 }
 
 [data-theme="heritage"] .icon-button {
-  background: linear-gradient(180deg, rgb(46 36 26 / 92%), rgb(33 26 19 / 92%));
-  color: #ecdcbf;
-  border-color: #78654b;
+  background: linear-gradient(180deg, rgb(39 51 47 / 94%), rgb(25 35 35 / 94%));
+  color: #f3e5c9;
+  border-color: #627265;
+}
+
+[data-theme="heritage"] .icon-button.danger {
+  background: linear-gradient(180deg, rgb(70 39 44 / 94%), rgb(43 29 32 / 94%));
+  border-color: #9f6b73;
+  color: #ffdbe1;
 }
 
 [data-theme="heritage"] .metric-card {
-  background: linear-gradient(160deg, rgb(43 34 24 / 92%), rgb(31 24 18 / 92%));
+  border-color: #4b5e55;
+  background:
+    linear-gradient(160deg, rgb(33 43 40 / 96%), rgb(20 29 31 / 95%)),
+    linear-gradient(120deg, rgb(45 212 191 / 6%), rgb(214 164 95 / 7%));
 }
 
 [data-theme="heritage"] .metric-card::before {
-  background: linear-gradient(90deg, #c8a870, #9f7f50);
+  background: linear-gradient(90deg, #2dd4bf, #d6a45f);
 }
 
-[data-theme="heritage"] .metric-card:nth-child(2)::before,
-[data-theme="heritage"] .metric-card:nth-child(3)::before,
-[data-theme="heritage"] .metric-card:nth-child(4)::before,
-[data-theme="heritage"] .metric-card:nth-child(5)::before,
+[data-theme="heritage"] .metric-card:nth-child(2)::before {
+  background: linear-gradient(90deg, #8ab8a8, #9aa7d9);
+}
+
+[data-theme="heritage"] .metric-card:nth-child(3)::before {
+  background: linear-gradient(90deg, #9fbd85, #2dd4bf);
+}
+
+[data-theme="heritage"] .metric-card:nth-child(4)::before {
+  background: linear-gradient(90deg, #9aa7d9, #c58b92);
+}
+
+[data-theme="heritage"] .metric-card:nth-child(5)::before {
+  background: linear-gradient(90deg, #d6a45f, #c58b92);
+}
+
 [data-theme="heritage"] .metric-card:nth-child(6)::before,
 [data-theme="heritage"] .metric-card:nth-child(7)::before {
-  background: linear-gradient(90deg, #b99a67, #85663f);
+  background: linear-gradient(90deg, #8ab8a8, #d6a45f);
+}
+
+[data-theme="heritage"] .metric-icon {
+  border-color: #607266;
+  background: rgb(138 184 168 / 12%);
+  color: #d7f2e8;
 }
 
 [data-theme="heritage"] .tab-bar {
-  border-color: #64543f;
+  border-color: #465950;
+  background:
+    linear-gradient(140deg, rgb(30 40 38 / 94%), rgb(20 30 31 / 94%)),
+    linear-gradient(110deg, rgb(45 212 191 / 7%), rgb(154 167 217 / 6%), rgb(214 164 95 / 7%));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 [data-theme="heritage"] .tab-bar button {
-  color: #d7c3a3;
+  color: #d7cfbd;
 }
 
 [data-theme="heritage"] .tab-bar button.active {
-  border-color: #9d855f;
-  background: linear-gradient(95deg, rgb(193 159 108 / 26%), rgb(172 128 89 / 24%), rgb(139 112 73 / 24%));
-  color: #f5e6ca;
+  border-color: #8fb79f;
+  background: linear-gradient(95deg, rgb(45 212 191 / 18%), rgb(154 167 217 / 14%), rgb(214 164 95 / 17%));
+  color: #fff1d7;
+}
+
+[data-theme="heritage"] .surface {
+  border-color: #3f524b;
+  background:
+    linear-gradient(145deg, rgb(27 37 36 / 94%), rgb(19 28 29 / 94%)),
+    linear-gradient(120deg, rgb(45 212 191 / 5%), rgb(214 164 95 / 5%));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+[data-theme="heritage"] .surface::before {
+  background: linear-gradient(90deg, #2dd4bf, #9aa7d9, #d6a45f, #c58b92);
+  opacity: 0.62;
+}
+
+[data-theme="heritage"] input {
+  border-color: #55665c;
+  background: rgb(21 30 30 / 96%);
+  color: #f3e5c9;
+}
+
+[data-theme="heritage"] input::placeholder {
+  color: #9ca99f;
+}
+
+[data-theme="heritage"] .error-banner {
+  border-color: #9f6b73;
+  background: rgb(63 34 39 / 78%);
+  color: #ffd8df;
+}
+
+[data-theme="heritage"] .loading-banner {
+  color: #bfcab6;
 }
 
 [data-theme="heritage"] .discovery-summary {
-  border-color: #78634a;
-  background: linear-gradient(120deg, rgb(55 43 31 / 86%), rgb(42 33 24 / 84%));
-  color: #ddc8a5;
+  border-color: #5f776a;
+  background: linear-gradient(120deg, rgb(29 43 39 / 88%), rgb(31 36 30 / 86%));
+  color: #d9ceb8;
 }
 
 [data-theme="heritage"] .connector-card {
-  border-color: #725e44;
+  border-color: #53685e;
   background:
-    linear-gradient(140deg, rgb(42 33 24 / 92%), rgb(29 23 17 / 90%)),
-    linear-gradient(120deg, rgb(196 161 110 / 10%), rgb(133 102 64 / 10%));
-  box-shadow: 0 0 0 1px rgb(201 170 120 / 10%) inset;
+    linear-gradient(140deg, rgb(31 42 39 / 94%), rgb(20 29 30 / 93%)),
+    linear-gradient(120deg, rgb(45 212 191 / 7%), rgb(214 164 95 / 7%));
+  box-shadow: 0 0 0 1px rgb(138 184 168 / 10%) inset;
 }
 
 [data-theme="heritage"] .connector-card span,
 [data-theme="heritage"] .connector-card small {
-  color: #bda687;
+  color: #aeb9aa;
 }
 
 [data-theme="heritage"] .connector-card strong {
-  color: #efdec2;
+  color: #f3e5c9;
 }
 
 [data-theme="heritage"] .data-table th,
 [data-theme="heritage"] .data-table td {
-  border-bottom-color: #574934;
+  border-bottom-color: #344740;
 }
 
 [data-theme="heritage"] .data-table th {
-  color: #e8d5b4;
-  background: rgb(39 31 23 / 85%);
+  color: #f0ddbc;
+  background: rgb(27 38 36 / 92%);
 }
 
 [data-theme="heritage"] .data-table tbody tr:hover {
-  background: rgb(193 159 108 / 10%);
+  background: rgb(45 212 191 / 7%);
 }
 
 [data-theme="heritage"] .pill {
-  border-color: #8f7654;
-  background: rgb(188 154 104 / 16%);
-  color: #ecd8b4;
+  border-color: #678171;
+  background: rgb(138 184 168 / 13%);
+  color: #d9f2e7;
 }
 
 [data-theme="heritage"] button.company-card {
-  border-color: #7a664a;
-  background: linear-gradient(150deg, rgb(40 31 23 / 95%), rgb(29 22 16 / 95%));
+  border-color: #4e6259;
+  background:
+    linear-gradient(150deg, rgb(29 40 38 / 96%), rgb(19 28 30 / 96%)),
+    linear-gradient(120deg, rgb(45 212 191 / 5%), rgb(154 167 217 / 4%));
 }
 
 [data-theme="heritage"] .company-card-metrics span,
 [data-theme="heritage"] .decision-chip-row span,
 [data-theme="heritage"] .source-breakdown span {
-  border-color: #8e7756;
-  background: rgb(184 150 101 / 15%);
-  color: #ecd9b7;
+  border-color: #5f7569;
+  background: rgb(138 184 168 / 12%);
+  color: #d9f2e7;
 }
 
 [data-theme="heritage"] .pill:nth-child(4n + 1),
 [data-theme="heritage"] .company-card-metrics span:nth-child(4n + 1),
 [data-theme="heritage"] .decision-chip-row span:nth-child(4n + 1),
 [data-theme="heritage"] .source-breakdown span:nth-child(4n + 1) {
-  border-color: rgb(233 201 146 / 40%);
-  background: rgb(198 160 107 / 18%);
-  color: #f2dfbe;
+  border-color: rgb(45 212 191 / 34%);
+  background: rgb(45 212 191 / 10%);
+  color: #c9fff4;
 }
 
 [data-theme="heritage"] .pill:nth-child(4n + 2),
 [data-theme="heritage"] .company-card-metrics span:nth-child(4n + 2),
 [data-theme="heritage"] .decision-chip-row span:nth-child(4n + 2),
 [data-theme="heritage"] .source-breakdown span:nth-child(4n + 2) {
-  border-color: rgb(202 169 119 / 36%);
-  background: rgb(160 124 80 / 20%);
-  color: #ecd4ad;
+  border-color: rgb(154 167 217 / 36%);
+  background: rgb(154 167 217 / 11%);
+  color: #e3e8ff;
 }
 
 [data-theme="heritage"] .pill:nth-child(4n + 3),
 [data-theme="heritage"] .company-card-metrics span:nth-child(4n + 3),
 [data-theme="heritage"] .decision-chip-row span:nth-child(4n + 3),
 [data-theme="heritage"] .source-breakdown span:nth-child(4n + 3) {
-  border-color: rgb(183 146 102 / 38%);
-  background: rgb(133 98 63 / 20%);
-  color: #e7cca4;
+  border-color: rgb(197 139 146 / 34%);
+  background: rgb(197 139 146 / 11%);
+  color: #ffdfe4;
 }
 
 [data-theme="heritage"] .pill:nth-child(4n + 4),
 [data-theme="heritage"] .company-card-metrics span:nth-child(4n + 4),
 [data-theme="heritage"] .decision-chip-row span:nth-child(4n + 4),
 [data-theme="heritage"] .source-breakdown span:nth-child(4n + 4) {
-  border-color: rgb(214 181 134 / 36%);
-  background: rgb(173 136 90 / 18%);
-  color: #f1ddba;
+  border-color: rgb(214 164 95 / 38%);
+  background: rgb(214 164 95 / 12%);
+  color: #ffe1ad;
 }
 
 [data-theme="heritage"] .company-card-score {
-  border-color: #917959;
-  background: rgb(186 151 103 / 24%);
+  border-color: #8fb79f;
+  background: rgb(45 212 191 / 13%);
   color: #f5e8cf;
 }
 
 [data-theme="heritage"] .company-avatar {
-  border-color: #967d5a;
-  background: linear-gradient(150deg, rgb(188 154 104 / 24%), rgb(130 101 64 / 24%));
-  color: #f2e2c4;
+  border-color: #708779;
+  background: linear-gradient(150deg, rgb(45 212 191 / 16%), rgb(214 164 95 / 13%));
+  color: #fff0d0;
 }
 
 [data-theme="heritage"] button.company-card.active {
-  border-color: #af9267;
-  background: linear-gradient(130deg, rgb(51 40 29 / 96%), rgb(40 31 23 / 96%));
+  border-color: #91b79d;
+  background:
+    linear-gradient(130deg, rgb(39 53 48 / 98%), rgb(24 35 35 / 98%)),
+    linear-gradient(120deg, rgb(45 212 191 / 10%), rgb(214 164 95 / 10%));
+  box-shadow: 0 8px 24px rgb(4 12 12 / 28%);
 }
 
 [data-theme="heritage"] .company-card-title span {
-  color: #ccb694;
+  color: #b6c0b4;
 }
 
 [data-theme="heritage"] .decision-card,
 [data-theme="heritage"] .kpi-item,
-[data-theme="heritage"] .news-row {
-  border-color: #776249;
+[data-theme="heritage"] .news-row,
+[data-theme="heritage"] .insight-card,
+[data-theme="heritage"] .score-formula {
+  border-color: #4d6158;
   background:
-    linear-gradient(130deg, rgb(40 31 23 / 90%), rgb(29 23 17 / 90%)),
-    linear-gradient(120deg, rgb(193 159 108 / 8%), rgb(133 102 64 / 7%));
+    linear-gradient(130deg, rgb(29 40 38 / 94%), rgb(19 28 29 / 94%)),
+    linear-gradient(120deg, rgb(45 212 191 / 5%), rgb(214 164 95 / 5%));
 }
 
 [data-theme="heritage"] .decision-card p,
 [data-theme="heritage"] .detail-header p,
 [data-theme="heritage"] .news-row span,
 [data-theme="heritage"] .panel-head p,
-[data-theme="heritage"] .muted {
-  color: #c9b492;
+[data-theme="heritage"] .muted,
+[data-theme="heritage"] .section-subtitle,
+[data-theme="heritage"] .insight-card span,
+[data-theme="heritage"] .insight-card small,
+[data-theme="heritage"] .score-formula span,
+[data-theme="heritage"] .score-line span {
+  color: #aeb9aa;
 }
 
 [data-theme="heritage"] .kpi-item span {
-  color: #d6c2a0;
+  color: #bfccb9;
 }
 
 [data-theme="heritage"] .kpi-item strong,
 [data-theme="heritage"] .news-row strong,
-[data-theme="heritage"] .heading-with-icon {
+[data-theme="heritage"] .heading-with-icon,
+[data-theme="heritage"] .decision-card h4,
+[data-theme="heritage"] .insight-card strong,
+[data-theme="heritage"] .score-formula strong,
+[data-theme="heritage"] .competitor-cell > strong,
+[data-theme="heritage"] .driver-stack strong {
   color: #f3e5c9;
 }
 
 [data-theme="heritage"] .data-table td,
 [data-theme="heritage"] .claims-table a {
-  color: #e3cfab;
+  color: #e8dbc4;
 }
 
 [data-theme="heritage"] .detail-pane .inline-link,
 [data-theme="heritage"] .detail-pane .linkedin-link,
 [data-theme="heritage"] .detail-pane a,
 [data-theme="heritage"] a {
-  color: #e9c992;
+  color: #a7dfce;
+}
+
+[data-theme="heritage"] .read-more-link,
+[data-theme="heritage"] .news-mini-more {
+  color: #a7dfce;
+}
+
+[data-theme="heritage"] .competitor-meta span,
+[data-theme="heritage"] .competitor-meta a,
+[data-theme="heritage"] .driver-stack span,
+[data-theme="heritage"] .job-result-metrics span,
+[data-theme="heritage"] .job-result-pill {
+  border-color: #52665c;
+  background: rgb(138 184 168 / 10%);
+  color: #d9ceb8;
+}
+
+[data-theme="heritage"] .job-result-metrics strong,
+[data-theme="heritage"] .job-result-pill strong {
+  color: #f3e5c9;
+}
+
+[data-theme="heritage"] .score-bar {
+  background: rgb(138 184 168 / 13%);
+}
+
+[data-theme="heritage"] .score-bar span {
+  background: linear-gradient(90deg, #2dd4bf, #d6a45f);
+}
+
+[data-theme="heritage"] .table-limit-row td,
+[data-theme="heritage"] .list-limit-note {
+  border-color: #4c5f56;
+  background: rgb(29 40 38 / 72%);
+  color: #aeb9aa;
 }
 
 [data-theme="heritage"] .company-list::-webkit-scrollbar-thumb {
-  background: #8a7350;
+  background: #5d7468;
 }
 
 .spin {
@@ -3469,6 +3250,11 @@ button.company-card.active {
 
   .url-form-actions {
     justify-content: flex-start;
+  }
+
+  .table-filter-bar {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .signal-columns {
